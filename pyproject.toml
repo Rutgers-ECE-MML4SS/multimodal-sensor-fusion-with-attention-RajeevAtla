@@ -27,3 +27,7 @@ dependencies = [
     "torchvision>=0.24.0",
     "tqdm>=4.67.1",
 ]
+
+[tool.ruff]
+line-length = 80
+output-format = "github"
