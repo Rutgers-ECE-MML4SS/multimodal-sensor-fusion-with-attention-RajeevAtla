@@ -514,6 +514,9 @@ def compute_calibration_metrics(
             all_labels.append(labels.cpu())
             all_logits.append(logits.cpu())
 
+    if not all_confidences:
+        raise ValueError("Dataloader produced no batches to evaluate.")
+
     confidences = torch.cat(all_confidences)
     predictions = torch.cat(all_predictions)
     labels = torch.cat(all_labels)

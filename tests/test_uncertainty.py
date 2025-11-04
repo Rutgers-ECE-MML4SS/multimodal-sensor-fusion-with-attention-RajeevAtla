@@ -178,6 +178,20 @@ def test_compute_calibration_metrics():
     assert set(metrics.keys()) == {"ece", "mce", "nll", "accuracy"}
 
 
+def test_compute_calibration_metrics_no_batches():
+    class EmptyDataset(Dataset):
+        def __len__(self):
+            return 0
+
+        def __getitem__(self, idx):
+            raise IndexError
+
+    loader = DataLoader(EmptyDataset(), batch_size=1)
+    model = LinearModel()
+    with pytest.raises(ValueError, match="no batches"):
+        uncertainty.compute_calibration_metrics(model, loader)
+
+
 def test_uncertainty_weighted_fusion_errors():
     fusion = uncertainty.UncertaintyWeightedFusion()
     with pytest.raises(ValueError):
