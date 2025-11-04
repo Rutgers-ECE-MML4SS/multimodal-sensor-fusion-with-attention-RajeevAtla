@@ -534,37 +534,56 @@ def compute_calibration_metrics(
     }
 
 
-if __name__ == "__main__":
-    # Test calibration metrics
+def main(
+    save_path: Path | str = "test_reliability.png",
+    num_samples: int = 1000,
+    num_classes: int = 10,
+) -> Dict[str, Any]:
+    """
+    CLI entry point to demonstrate uncertainty calibration utilities.
+
+    Args:
+        save_path: Location to write the reliability diagram.
+        num_samples: Number of synthetic samples to generate.
+        num_classes: Number of classes for synthetic logits.
+
+    Returns:
+        Dictionary summarizing generated metrics and side effects.
+    """
     print("Testing calibration metrics...")
 
-    # Generate fake predictions
-    num_samples = 1000
-    num_classes = 10
-
-    # Well-calibrated predictions
     logits = torch.randn(num_samples, num_classes)
     labels = torch.randint(0, num_classes, (num_samples,))
     probs = F.softmax(logits, dim=1)
     confidences, predictions = torch.max(probs, dim=1)
 
-    # Test ECE
+    results: Dict[str, Any] = {"save_path": str(Path(save_path))}
+
     try:
         ece = CalibrationMetrics.expected_calibration_error(
             confidences, predictions, labels
         )
         print(f"✓ ECE computed: {ece:.4f}")
+        results["ece"] = ece
     except NotImplementedError:
         print("✗ ECE not implemented yet")
+        results["ece"] = None
 
-    # Test reliability diagram
     try:
         CalibrationMetrics.reliability_diagram(
             confidences.numpy(),
             predictions.numpy(),
             labels.numpy(),
-            save_path="test_reliability.png",
+            save_path=save_path,
         )
         print("✓ Reliability diagram created")
+        results["diagram_created"] = True
     except NotImplementedError:
         print("✗ Reliability diagram not implemented yet")
+        results["diagram_created"] = False
+
+    return results
+
+
+if __name__ == "__main__":
+    main()

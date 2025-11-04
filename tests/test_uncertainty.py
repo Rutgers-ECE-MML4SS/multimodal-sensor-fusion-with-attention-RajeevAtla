@@ -152,32 +152,19 @@ def test_uncertainty_weighted_fusion_errors():
         fusion({"mod1": torch.zeros(1, 2)}, {}, torch.ones(1, 1))
 
 
-def test_uncertainty_script_runs(capsys, tmp_path, monkeypatch):
-    original_reliability = uncertainty.CalibrationMetrics.reliability_diagram
+def test_uncertainty_main_generates_outputs(capsys, tmp_path):
     output_path = tmp_path / "cli_reliability.png"
-
-    def patched_reliability(confidences, predictions, labels, num_bins=15, save_path=None):
-        return original_reliability(
-            confidences,
-            predictions,
-            labels,
-            num_bins=num_bins,
-            save_path=output_path,
-        )
-
-    monkeypatch.setattr(
-        uncertainty.CalibrationMetrics,
-        "reliability_diagram",
-        staticmethod(patched_reliability),
-    )
-    runpy.run_module("uncertainty", run_name="__main__")
+    results = uncertainty.main(save_path=output_path, num_samples=32, num_classes=4)
     captured = capsys.readouterr().out
     assert "Testing calibration metrics..." in captured
     assert "Reliability diagram created" in captured
     assert output_path.exists()
+    assert results["diagram_created"] is True
+    assert results["save_path"] == str(output_path)
+    assert isinstance(results["ece"], float)
 
 
-def test_uncertainty_script_handles_not_implemented(monkeypatch, capsys):
+def test_uncertainty_main_handles_not_implemented(monkeypatch, capsys, tmp_path):
     def raise_ece(*args, **kwargs):
         raise NotImplementedError("ece unavailable")
 
@@ -195,7 +182,18 @@ def test_uncertainty_script_handles_not_implemented(monkeypatch, capsys):
         staticmethod(raise_reliability),
     )
 
-    runpy.run_module("uncertainty", run_name="__main__")
+    results = uncertainty.main(save_path=tmp_path / "unused.png", num_samples=8, num_classes=2)
     captured = capsys.readouterr().out
     assert "ECE not implemented yet" in captured
     assert "Reliability diagram not implemented yet" in captured
+    assert results["ece"] is None
+    assert results["diagram_created"] is False
+
+
+def test_uncertainty_module_entrypoint(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    runpy.run_module("uncertainty", run_name="__main__")
+    captured = capsys.readouterr().out
+    assert "Testing calibration metrics..." in captured
+    assert "Reliability diagram created" in captured
+    assert (tmp_path / "test_reliability.png").exists()
