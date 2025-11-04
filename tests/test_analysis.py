@@ -138,3 +138,37 @@ def test_analysis_main_cli(tmp_path, monkeypatch):
 
     assert (output_dir / "fusion_comparison.png").exists()
     assert (output_dir / "missing_modality.png").exists()
+
+
+def test_analysis_main_uses_default_cli_paths(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    experiments_dir = tmp_path / "experiments"
+    experiments_dir.mkdir()
+
+    (experiments_dir / "fusion_comparison.json").write_text(json.dumps(_fusion_results()))
+    (experiments_dir / "missing_modality.json").write_text(json.dumps(_missing_results()))
+
+    monkeypatch.setattr(sys, "argv", ["analysis.py"])
+    analysis.main()
+
+    expected_output = tmp_path / "analysis"
+    assert (expected_output / "fusion_comparison.png").exists()
+    assert (expected_output / "missing_modality.png").exists()
+
+
+def test_calibration_diagram_handles_edge_confidences(tmp_path):
+    edge_path = tmp_path / "edge_bins.png"
+    confidences = np.array([0.0, 0.5, 1.0])
+    predictions = np.array([0, 0, 1])
+    labels = np.array([0, 1, 1])
+
+    analysis.plot_calibration_diagram(
+        confidences,
+        predictions,
+        labels,
+        num_bins=4,
+        save_path=edge_path,
+    )
+
+    assert edge_path.exists()
+    assert edge_path.stat().st_size > 0
