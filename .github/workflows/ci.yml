@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          activate-environment: "true"
+          enable-cache: "true"
+          restore-cache: "true"
+          save-cache: "true"
+          cache-python: "true"
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Run Ruff
+        run: uv run ruff check
+
+      - name: Run Pytest
+        run: uv run pytest --cov=src
