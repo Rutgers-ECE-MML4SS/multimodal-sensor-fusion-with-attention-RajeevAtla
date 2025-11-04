@@ -9,7 +9,7 @@ This module implements three fusion strategies:
 
 import torch
 import torch.nn as nn
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 
 from attention import CrossModalAttention
 
@@ -21,6 +21,12 @@ class EarlyFusion(nn.Module):
     Pros: Joint representation learning across modalities
     Cons: Requires temporal alignment, sensitive to missing modalities
     """
+
+    modality_names: list[str]
+    modality_dims: Dict[str, int]
+    fusion: nn.Sequential
+    num_classes: int
+    hidden_dim: int
 
     def __init__(
         self,
@@ -38,9 +44,14 @@ class EarlyFusion(nn.Module):
             dropout: Dropout probability
         """
         super().__init__()
-        self.modality_names = list(modality_dims.keys())
-        self.modality_dims = modality_dims
-        concat_dim = sum(modality_dims.values())
+        dims = dict(modality_dims)
+        modality_names = list(dims.keys())
+        cast_self = cast(Any, self)
+        cast_self.modality_names = modality_names
+        cast_self.modality_dims = dims
+        cast_self.num_classes = num_classes
+        cast_self.hidden_dim = hidden_dim
+        concat_dim = sum(dims.values())
 
         self.fusion = nn.Sequential(
             nn.Linear(concat_dim, hidden_dim),
@@ -51,9 +62,6 @@ class EarlyFusion(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, num_classes),
         )
-
-        self.num_classes = num_classes
-        self.hidden_dim = hidden_dim
 
     def forward(
         self,
@@ -120,6 +128,13 @@ class LateFusion(nn.Module):
     Cons: Limited cross-modal interaction, fusion only at decision level
     """
 
+    modality_names: list[str]
+    modality_dims: Dict[str, int]
+    num_modalities: int
+    classifiers: nn.ModuleDict
+    weight_logits: torch.nn.Parameter
+    dropout: nn.Dropout
+
     def __init__(
         self,
         modality_dims: Dict[str, int],
@@ -135,12 +150,15 @@ class LateFusion(nn.Module):
             dropout: Dropout probability
         """
         super().__init__()
-        self.modality_names = list(modality_dims.keys())
-        self.num_modalities = len(self.modality_names)
-        self.modality_dims = modality_dims
+        dims = dict(modality_dims)
+        modality_names = list(dims.keys())
+        cast_self = cast(Any, self)
+        cast_self.modality_names = modality_names
+        cast_self.num_modalities = len(modality_names)
+        cast_self.modality_dims = dims
 
         classifiers = {}
-        for modality, dim in modality_dims.items():
+        for modality, dim in dims.items():
             classifiers[modality] = nn.Sequential(
                 nn.Linear(dim, hidden_dim),
                 nn.ReLU(),
@@ -229,6 +247,15 @@ class HybridFusion(nn.Module):
     This is the main focus of the assignment!
     """
 
+    modality_names: list[str]
+    num_modalities: int
+    hidden_dim: int
+    projections: nn.ModuleDict
+    attention_modules: nn.ModuleDict
+    gating_layers: nn.ModuleDict
+    classifier: nn.Sequential
+    dropout: nn.Dropout
+
     def __init__(
         self,
         modality_dims: Dict[str, int],
@@ -246,16 +273,19 @@ class HybridFusion(nn.Module):
             dropout: Dropout probability
         """
         super().__init__()
-        self.modality_names = list(modality_dims.keys())
-        self.num_modalities = len(self.modality_names)
-        self.hidden_dim = hidden_dim
+        dims = dict(modality_dims)
+        modality_names = list(dims.keys())
+        cast_self = cast(Any, self)
+        cast_self.modality_names = modality_names
+        cast_self.num_modalities = len(modality_names)
+        cast_self.hidden_dim = hidden_dim
 
         self.projections = nn.ModuleDict(
             {
                 modality: nn.Sequential(
                     nn.Linear(dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout)
                 )
-                for modality, dim in modality_dims.items()
+                for modality, dim in dims.items()
             }
         )
 

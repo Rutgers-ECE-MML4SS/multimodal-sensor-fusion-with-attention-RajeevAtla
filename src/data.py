@@ -133,7 +133,7 @@ class SyntheticMultimodalDataset(data.Dataset):
         self,
         num_samples: int = 10000,
         num_classes: int = 5,
-        modality_dims: Dict[str, int] = None,
+        modality_dims: Optional[Dict[str, int]] = None,
         sequence_length: int = 100,
         split: str = "train",
         seed: int = 42,
@@ -150,6 +150,7 @@ class SyntheticMultimodalDataset(data.Dataset):
         if modality_dims is None:
             modality_dims = {"sensor1": 32, "sensor2": 32, "sensor3": 32}
 
+        modality_dims = dict(modality_dims)
         self.num_samples = num_samples
         self.num_classes = num_classes
         self.modality_dims = modality_dims

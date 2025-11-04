@@ -7,11 +7,13 @@ Implements methods for estimating and calibrating confidence scores:
 3. Uncertainty-weighted fusion
 """
 
+from pathlib import Path
+from typing import Any, Dict, List, Sequence, Tuple, cast
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Tuple, Dict
 
 
 class MCDropoutUncertainty(nn.Module):
@@ -22,6 +24,9 @@ class MCDropoutUncertainty(nn.Module):
     prediction uncertainty via variance.
     """
 
+    model: nn.Module
+    num_samples: int
+
     def __init__(self, model: nn.Module, num_samples: int = 10):
         """
         Args:
@@ -29,8 +34,9 @@ class MCDropoutUncertainty(nn.Module):
             num_samples: Number of MC dropout samples
         """
         super().__init__()
-        self.model = model
-        self.num_samples = num_samples
+        cast_self = cast(Any, self)
+        cast_self.model = model
+        cast_self.num_samples = num_samples
 
     def forward(self, *args, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -183,7 +189,7 @@ class CalibrationMetrics:
         predictions: np.ndarray,
         labels: np.ndarray,
         num_bins: int = 15,
-        save_path: str = None,
+        save_path: Path | str | None = None,
     ) -> None:
         """
         Plot reliability diagram showing calibration.
@@ -260,8 +266,10 @@ class CalibrationMetrics:
         ax.legend(loc="lower right")
         plt.tight_layout()
 
-        if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        if save_path is not None:
+            output_path = Path(save_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(output_path, dpi=300, bbox_inches="tight")
             plt.close(fig)
         else:
             plt.show()
@@ -275,13 +283,16 @@ class UncertaintyWeightedFusion(nn.Module):
     Weights are proportional to 1 / (uncertainty_i + epsilon)
     """
 
+    epsilon: float
+
     def __init__(self, epsilon: float = 1e-6):
         """
         Args:
             epsilon: Small constant to avoid division by zero
         """
         super().__init__()
-        self.epsilon = epsilon
+        cast_self = cast(Any, self)
+        cast_self.epsilon = epsilon
 
     def forward(
         self,
@@ -351,6 +362,8 @@ class TemperatureScaling(nn.Module):
     Reference: Guo et al. "On Calibration of Modern Neural Networks", ICML 2017
     """
 
+    temperature: nn.Parameter
+
     def __init__(self):
         super().__init__()
         self.temperature = nn.Parameter(torch.ones(1))
@@ -412,13 +425,16 @@ class EnsembleUncertainty:
     Uncertainty = variance across ensemble predictions.
     """
 
-    def __init__(self, models: list):
+    models: List[nn.Module]
+    num_models: int
+
+    def __init__(self, models: Sequence[nn.Module]):
         """
         Args:
             models: List of trained models (same architecture)
         """
-        self.models = models
-        self.num_models = len(models)
+        self.models = list(models)
+        self.num_models = len(self.models)
 
     def predict_with_uncertainty(
         self, inputs: torch.Tensor

@@ -15,6 +15,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 import json
+from typing import Any, Dict, List, cast
 
 from data import create_dataloaders
 from fusion import build_fusion_model
@@ -28,6 +29,13 @@ class MultimodalFusionModule(pl.LightningModule):
     Handles training loop, validation, and logging.
     """
 
+    config: DictConfig
+    encoders: nn.ModuleDict
+    fusion_model: nn.Module
+    criterion: nn.Module
+    train_metrics: List[Dict[str, float]]
+    val_metrics: List[Dict[str, float]]
+
     def __init__(self, config: DictConfig):
         """
         Args:
@@ -35,7 +43,8 @@ class MultimodalFusionModule(pl.LightningModule):
         """
         super().__init__()
         self.save_hyperparameters()
-        self.config = config
+        cast_self = cast(Any, self)
+        cast_self.config = config
 
         # Build encoders for each modality
         self.encoders = nn.ModuleDict()
@@ -69,8 +78,8 @@ class MultimodalFusionModule(pl.LightningModule):
         self.criterion = nn.CrossEntropyLoss()
 
         # Metrics storage
-        self.train_metrics = []
-        self.val_metrics = []
+        cast_self.train_metrics = []
+        cast_self.val_metrics = []
 
     def forward(self, features, mask=None):
         """

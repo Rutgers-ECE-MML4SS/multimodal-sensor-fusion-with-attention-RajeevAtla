@@ -8,13 +8,14 @@ Generates all required plots for experiments:
 - Calibration reliability diagrams
 """
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
+import argparse
 import json
 from pathlib import Path
-import argparse
-from typing import Dict, List
+from typing import Any, Mapping, Sequence
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
 
 
 plt.style.use("seaborn-v0_8-darkgrid")
@@ -22,8 +23,9 @@ sns.set_palette("husl")
 
 
 def plot_fusion_comparison(
-    results: Dict, save_path: str = "analysis/fusion_comparison.png"
-):
+    results: Mapping[str, Any],
+    save_path: Path | str = Path("analysis/fusion_comparison.png"),
+) -> None:
     """
     Plot comparison of fusion strategies.
 
@@ -77,16 +79,17 @@ def plot_fusion_comparison(
     plt.tight_layout()
 
     # Save
-    save_path = Path(save_path)
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"Fusion comparison plot saved to: {save_path}")
+    output_path = Path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"Fusion comparison plot saved to: {output_path}")
     plt.close()
 
 
 def plot_missing_modality_robustness(
-    results: Dict, save_path: str = "analysis/missing_modality.png"
-):
+    results: Mapping[str, Any],
+    save_path: Path | str = Path("analysis/missing_modality.png"),
+) -> None:
     """
     Plot performance degradation with missing modalities.
 
@@ -140,7 +143,7 @@ def plot_missing_modality_robustness(
     modality_names = list(single_modalities.keys())
     accuracies = [single_modalities[m]["accuracy"] for m in modality_names]
 
-    colors = plt.cm.Set3(np.linspace(0, 1, len(modality_names)))
+    colors = plt.get_cmap("Set3")(np.linspace(0, 1, len(modality_names)))
     axes[1].bar(range(len(modality_names)), accuracies, color=colors)
     axes[1].set_xticks(range(len(modality_names)))
     axes[1].set_xticklabels(modality_names, rotation=45, ha="right")
@@ -162,18 +165,18 @@ def plot_missing_modality_robustness(
     plt.tight_layout()
 
     # Save
-    save_path = Path(save_path)
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"Missing modality plot saved to: {save_path}")
+    output_path = Path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"Missing modality plot saved to: {output_path}")
     plt.close()
 
 
 def plot_attention_weights(
     attention_weights: np.ndarray,
-    modality_names: List[str],
-    save_path: str = "analysis/attention_viz.png",
-):
+    modality_names: Sequence[str],
+    save_path: Path | str = Path("analysis/attention_viz.png"),
+) -> None:
     """
     Visualize attention weights between modalities.
 
@@ -219,10 +222,10 @@ def plot_attention_weights(
     plt.tight_layout()
 
     # Save
-    save_path = Path(save_path)
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"Attention visualization saved to: {save_path}")
+    output_path = Path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"Attention visualization saved to: {output_path}")
     plt.close()
 
 
@@ -231,8 +234,8 @@ def plot_calibration_diagram(
     predictions: np.ndarray,
     labels: np.ndarray,
     num_bins: int = 15,
-    save_path: str = "analysis/calibration.png",
-):
+    save_path: Path | str = Path("analysis/calibration.png"),
+) -> None:
     """
     Plot reliability diagram for calibration.
 
@@ -326,14 +329,16 @@ def plot_calibration_diagram(
     plt.tight_layout()
 
     # Save
-    save_path = Path(save_path)
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"Calibration diagram saved to: {save_path}")
+    output_path = Path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"Calibration diagram saved to: {output_path}")
     plt.close()
 
 
-def generate_all_plots(experiment_dir: str, output_dir: str):
+def generate_all_plots(
+    experiment_dir: Path | str, output_dir: Path | str
+) -> None:
     """
     Generate all required plots from experiment results.
 
@@ -341,31 +346,33 @@ def generate_all_plots(experiment_dir: str, output_dir: str):
         experiment_dir: Directory containing experiment JSON files
         output_dir: Directory to save plots
     """
-    experiment_dir = Path(experiment_dir)
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    experiment_path = Path(experiment_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     print("=" * 80)
     print("Generating Analysis Plots")
     print("=" * 80)
 
     # Plot fusion comparison
-    fusion_file = experiment_dir / "fusion_comparison.json"
+    fusion_file = experiment_path / "fusion_comparison.json"
     if fusion_file.exists():
         print("\n1. Fusion strategy comparison...")
         with open(fusion_file) as f:
             results = json.load(f)
-        plot_fusion_comparison(results, output_dir / "fusion_comparison.png")
+        plot_fusion_comparison(results, output_path / "fusion_comparison.png")
     else:
         print(f"\nWarning: {fusion_file} not found. Skipping fusion comparison plot.")
 
     # Plot missing modality robustness
-    missing_file = experiment_dir / "missing_modality.json"
+    missing_file = experiment_path / "missing_modality.json"
     if missing_file.exists():
         print("\n2. Missing modality robustness...")
         with open(missing_file) as f:
             results = json.load(f)
-        plot_missing_modality_robustness(results, output_dir / "missing_modality.png")
+        plot_missing_modality_robustness(
+            results, output_path / "missing_modality.png"
+        )
     else:
         print(f"\nWarning: {missing_file} not found. Skipping missing modality plot.")
 
@@ -374,7 +381,7 @@ def generate_all_plots(experiment_dir: str, output_dir: str):
 
     print("\n" + "=" * 80)
     print("Plot generation complete!")
-    print(f"Plots saved to: {output_dir}")
+    print(f"Plots saved to: {output_path}")
     print("=" * 80)
 
     print("\nNote: To generate attention and calibration plots, call:")

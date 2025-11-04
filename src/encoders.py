@@ -7,9 +7,10 @@ Implements lightweight encoders suitable for CPU training:
 3. SimpleMLPEncoder: For pre-extracted features
 """
 
+from typing import Any, Dict, Optional, cast
+
 import torch
 import torch.nn as nn
-from typing import Optional
 
 
 class SequenceEncoder(nn.Module):
@@ -19,6 +20,17 @@ class SequenceEncoder(nn.Module):
     Options: 1D CNN, LSTM, GRU, or Transformer
     Output: Fixed-size embedding per sequence
     """
+
+    encoder_type: str
+    hidden_dim: int
+    output_dim: int
+    dropout_layer: nn.Dropout
+    rnn: Optional[nn.Module]
+    conv_net: Optional[nn.Module]
+    pool: Optional[nn.Module]
+    input_projection: Optional[nn.Linear]
+    transformer: Optional[nn.TransformerEncoder]
+    projection: nn.Module
 
     def __init__(
         self,
@@ -39,13 +51,21 @@ class SequenceEncoder(nn.Module):
             dropout: Dropout probability
         """
         super().__init__()
-        self.encoder_type = encoder_type
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
+        cast_self = cast(Any, self)
+        cast_self.encoder_type = encoder_type
+        cast_self.hidden_dim = hidden_dim
+        cast_self.output_dim = output_dim
         self.dropout_layer = nn.Dropout(dropout)
 
+        cast_self.rnn = None
+        cast_self.conv_net = None
+        cast_self.pool = None
+        cast_self.input_projection = None
+        cast_self.transformer = None
+        self.projection = nn.Identity()
+
         if encoder_type == "lstm":
-            self.rnn = nn.LSTM(
+            cast_self.rnn = nn.LSTM(
                 input_dim,
                 hidden_dim,
                 num_layers=num_layers,
@@ -55,7 +75,7 @@ class SequenceEncoder(nn.Module):
             self.projection = nn.Linear(hidden_dim, output_dim)
 
         elif encoder_type == "gru":
-            self.rnn = nn.GRU(
+            cast_self.rnn = nn.GRU(
                 input_dim,
                 hidden_dim,
                 num_layers=num_layers,
@@ -65,7 +85,7 @@ class SequenceEncoder(nn.Module):
             self.projection = nn.Linear(hidden_dim, output_dim)
 
         elif encoder_type == "cnn":
-            self.conv_net = nn.Sequential(
+            cast_self.conv_net = nn.Sequential(
                 nn.Conv1d(input_dim, hidden_dim, kernel_size=3, padding=1),
                 nn.BatchNorm1d(hidden_dim),
                 nn.ReLU(),
@@ -73,16 +93,16 @@ class SequenceEncoder(nn.Module):
                 nn.BatchNorm1d(hidden_dim),
                 nn.ReLU(),
             )
-            self.pool = nn.AdaptiveAvgPool1d(1)
+            cast_self.pool = nn.AdaptiveAvgPool1d(1)
             self.projection = nn.Linear(hidden_dim, output_dim)
 
         elif encoder_type == "transformer":
-            self.input_projection = nn.Linear(input_dim, hidden_dim)
+            cast_self.input_projection = nn.Linear(input_dim, hidden_dim)
             nhead = 4 if hidden_dim % 4 == 0 else 1
             encoder_layer = nn.TransformerEncoderLayer(
                 d_model=hidden_dim, nhead=nhead, dropout=dropout, batch_first=True
             )
-            self.transformer = nn.TransformerEncoder(
+            cast_self.transformer = nn.TransformerEncoder(
                 encoder_layer, num_layers=num_layers
             )
             self.projection = nn.Linear(hidden_dim, output_dim)
@@ -110,8 +130,11 @@ class SequenceEncoder(nn.Module):
         if self.encoder_type in ["lstm", "gru"]:
             rnn_input = sequence
             enforce_lengths = lengths is not None
+            if self.rnn is None:
+                raise RuntimeError("RNN module not initialized.")
 
             if enforce_lengths:
+                assert lengths is not None
                 lengths_cpu = lengths.to(device=sequence.device).to(torch.int64).cpu()
                 packed = nn.utils.rnn.pack_padded_sequence(
                     rnn_input, lengths_cpu, batch_first=True, enforce_sorted=False
@@ -134,12 +157,16 @@ class SequenceEncoder(nn.Module):
 
         if self.encoder_type == "cnn":
             x = sequence.transpose(1, 2)  # (batch, input_dim, seq_len)
+            if self.conv_net is None or self.pool is None:
+                raise RuntimeError("CNN modules not initialized.")
             x = self.conv_net(x)
             x = self.pool(x).squeeze(-1)
             encoding = self.projection(self.dropout_layer(x))
             return encoding
 
         if self.encoder_type == "transformer":
+            if self.input_projection is None or self.transformer is None:
+                raise RuntimeError("Transformer modules not initialized.")
             x = self.input_projection(sequence)
             if lengths is not None:
                 lengths = lengths.to(device=sequence.device, dtype=torch.long)
@@ -176,6 +203,11 @@ class FrameEncoder(nn.Module):
     Aggregates frame-level features into video-level embedding.
     """
 
+    temporal_pooling: str
+    frame_processor: nn.Sequential
+    attention: Optional[nn.Linear]
+    projection: nn.Sequential
+
     def __init__(
         self,
         frame_dim: int,
@@ -193,16 +225,18 @@ class FrameEncoder(nn.Module):
             dropout: Dropout probability
         """
         super().__init__()
-        self.temporal_pooling = temporal_pooling
+        cast_self = cast(Any, self)
+        cast_self.temporal_pooling = temporal_pooling
         self.frame_processor = nn.Sequential(
             nn.Linear(frame_dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout)
         )
 
+        cast_self.attention = None
         if temporal_pooling == "attention":
-            self.attention = nn.Linear(hidden_dim, 1)
+            cast_self.attention = nn.Linear(hidden_dim, 1)
         elif temporal_pooling in ["average", "max"]:
             # Simple pooling, no learnable parameters needed
-            self.attention = None
+            cast_self.attention = None
         else:
             raise ValueError(f"Unknown pooling: {temporal_pooling}")
 
@@ -273,6 +307,8 @@ class FrameEncoder(nn.Module):
         Returns:
             pooled: (batch_size, frame_dim) - attended frame features
         """
+        if self.attention is None:
+            raise RuntimeError("Attention layer not initialized.")
         scores = self.attention(frames)  # (batch, num_frames, 1)
 
         if mask is not None:
@@ -291,6 +327,8 @@ class SimpleMLPEncoder(nn.Module):
     Use this when working with pre-computed features
     (e.g., ResNet features for images, MFCC for audio).
     """
+
+    encoder: nn.Sequential
 
     def __init__(
         self,
@@ -342,7 +380,10 @@ class SimpleMLPEncoder(nn.Module):
 
 
 def build_encoder(
-    modality: str, input_dim: int, output_dim: int, encoder_config: dict = None
+    modality: str,
+    input_dim: int,
+    output_dim: int,
+    encoder_config: Optional[Dict[str, Any]] = None,
 ) -> nn.Module:
     """
     Factory function to build appropriate encoder for each modality.
@@ -356,21 +397,20 @@ def build_encoder(
     Returns:
         Encoder module appropriate for the modality
     """
-    if encoder_config is None:
-        encoder_config = {}
+    config: Dict[str, Any] = dict(encoder_config) if encoder_config else {}
 
     if modality in ["video", "frames"]:
         return FrameEncoder(
-            frame_dim=input_dim, output_dim=output_dim, **encoder_config
+            frame_dim=input_dim, output_dim=output_dim, **config
         )
     elif modality in ["imu", "audio", "mocap", "accelerometer"]:
         return SequenceEncoder(
-            input_dim=input_dim, output_dim=output_dim, **encoder_config
+            input_dim=input_dim, output_dim=output_dim, **config
         )
     else:
         # Default to MLP for unknown modalities
         return SimpleMLPEncoder(
-            input_dim=input_dim, output_dim=output_dim, **encoder_config
+            input_dim=input_dim, output_dim=output_dim, **config
         )
 
 

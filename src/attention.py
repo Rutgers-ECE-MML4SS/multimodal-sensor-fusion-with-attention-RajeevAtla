@@ -6,9 +6,11 @@ Implements:
 2. TemporalAttention: Attention over time steps in sequences
 """
 
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, cast
+
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple
 
 
 class CrossModalAttention(nn.Module):
@@ -18,6 +20,16 @@ class CrossModalAttention(nn.Module):
     Example: Video features attend to IMU features to incorporate
     relevant motion information at each timestep.
     """
+
+    hidden_dim: int
+    num_heads: int
+    head_dim: int
+    query_proj: nn.Linear
+    key_proj: nn.Linear
+    value_proj: nn.Linear
+    out_proj: nn.Linear
+    dropout: nn.Dropout
+    scale: float
 
     def __init__(
         self,
@@ -36,9 +48,11 @@ class CrossModalAttention(nn.Module):
             dropout: Dropout probability
         """
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.num_heads = num_heads
-        self.head_dim = hidden_dim // num_heads
+        head_dim = hidden_dim // num_heads
+        cast_self = cast(Any, self)
+        cast_self.hidden_dim = hidden_dim
+        cast_self.num_heads = num_heads
+        cast_self.head_dim = head_dim
 
         assert hidden_dim % num_heads == 0, (
             f"hidden_dim ({hidden_dim}) must be divisible by num_heads ({num_heads})"
@@ -49,7 +63,7 @@ class CrossModalAttention(nn.Module):
         self.value_proj = nn.Linear(key_dim, hidden_dim)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim)
         self.dropout = nn.Dropout(dropout)
-        self.scale = self.head_dim**-0.5
+        cast_self.scale = head_dim**-0.5
 
     def forward(
         self,
@@ -129,6 +143,17 @@ class TemporalAttention(nn.Module):
     Useful for: Variable-length sequences, weighting important timesteps
     """
 
+    feature_dim: int
+    hidden_dim: int
+    num_heads: int
+    head_dim: int
+    query_proj: nn.Linear
+    key_proj: nn.Linear
+    value_proj: nn.Linear
+    out_proj: nn.Linear
+    dropout: nn.Dropout
+    scale: float
+
     def __init__(
         self,
         feature_dim: int,
@@ -144,17 +169,19 @@ class TemporalAttention(nn.Module):
             dropout: Dropout probability
         """
         super().__init__()
-        self.feature_dim = feature_dim
-        self.hidden_dim = hidden_dim
-        self.num_heads = num_heads
-        self.head_dim = hidden_dim // num_heads
+        head_dim = hidden_dim // num_heads
+        cast_self = cast(Any, self)
+        cast_self.feature_dim = feature_dim
+        cast_self.hidden_dim = hidden_dim
+        cast_self.num_heads = num_heads
+        cast_self.head_dim = head_dim
 
         self.query_proj = nn.Linear(feature_dim, hidden_dim)
         self.key_proj = nn.Linear(feature_dim, hidden_dim)
         self.value_proj = nn.Linear(feature_dim, hidden_dim)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim)
         self.dropout = nn.Dropout(dropout)
-        self.scale = self.head_dim**-0.5
+        cast_self.scale = head_dim**-0.5
 
     def forward(
         self, sequence: torch.Tensor, mask: Optional[torch.Tensor] = None
@@ -242,9 +269,15 @@ class PairwiseModalityAttention(nn.Module):
     Example: {video, audio, IMU} -> {video<->audio, video<->IMU, audio<->IMU}
     """
 
+    modality_names: list[str]
+    num_modalities: int
+    hidden_dim: int
+    projections: nn.ModuleDict
+    attention_layers: nn.ModuleDict
+
     def __init__(
         self,
-        modality_dims: dict,
+        modality_dims: Mapping[str, int],
         hidden_dim: int = 256,
         num_heads: int = 4,
         dropout: float = 0.1,
@@ -258,16 +291,19 @@ class PairwiseModalityAttention(nn.Module):
             dropout: Dropout probability
         """
         super().__init__()
-        self.modality_names = list(modality_dims.keys())
-        self.num_modalities = len(self.modality_names)
-        self.hidden_dim = hidden_dim
+        dims_dict = dict(modality_dims)
+        modality_names = list(dims_dict.keys())
+        cast_self = cast(Any, self)
+        cast_self.modality_names = modality_names
+        cast_self.num_modalities = len(modality_names)
+        cast_self.hidden_dim = hidden_dim
 
         self.projections = nn.ModuleDict(
             {
                 modality: nn.Sequential(
                     nn.Linear(dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout)
                 )
-                for modality, dim in modality_dims.items()
+                for modality, dim in dims_dict.items()
             }
         )
 
@@ -286,8 +322,10 @@ class PairwiseModalityAttention(nn.Module):
         self.attention_layers = nn.ModuleDict(attention_layers)
 
     def forward(
-        self, modality_features: dict, modality_mask: Optional[torch.Tensor] = None
-    ) -> Tuple[dict, dict]:
+        self,
+        modality_features: Mapping[str, torch.Tensor],
+        modality_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
         """
         Apply pairwise attention between all modalities.
 
@@ -357,7 +395,9 @@ class PairwiseModalityAttention(nn.Module):
 
 
 def visualize_attention(
-    attention_weights: torch.Tensor, modality_names: list, save_path: str = None
+    attention_weights: torch.Tensor,
+    modality_names: Sequence[str],
+    save_path: Path | str | None = None,
 ) -> None:
     """
     Visualize attention weights between modalities.
@@ -406,8 +446,10 @@ def visualize_attention(
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     plt.tight_layout()
 
-    if save_path:
-        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    if save_path is not None:
+        output_path = Path(save_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
     else:
         plt.show()
