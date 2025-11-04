@@ -15,8 +15,8 @@ import eval as evaluation
 class DummyModel(torch.nn.Module):
     def __init__(self, num_modalities=2, num_classes=3):
         super().__init__()
-        self.num_modalities = num_modalities
-        self.num_classes = num_classes
+        object.__setattr__(self, "num_modalities", num_modalities)
+        object.__setattr__(self, "num_classes", num_classes)
 
     def forward(self, features, mask):
         summed = torch.zeros(next(iter(features.values())).shape[0])
@@ -289,16 +289,16 @@ def test_eval_script_entrypoint_runs(tmp_path, monkeypatch, capsys):
     def passthrough(iterable, **kwargs):
         return iterable
 
-    tqdm_stub.tqdm = passthrough
+    setattr(tqdm_stub, "tqdm", passthrough)
 
     monkeypatch.setitem(system_mod.modules, "tqdm", tqdm_stub)
     monkeypatch.setitem(system_mod.modules, "train", types.ModuleType("train"))
     monkeypatch.setitem(system_mod.modules, "data", types.ModuleType("data"))
     monkeypatch.setitem(system_mod.modules, "uncertainty", types.ModuleType("uncertainty"))
 
-    system_mod.modules["train"].MultimodalFusionModule = LoaderWrapper
-    system_mod.modules["data"].create_dataloaders = dataloader_factory
-    system_mod.modules["uncertainty"].CalibrationMetrics = CalibrationWrapper
+    setattr(system_mod.modules["train"], "MultimodalFusionModule", LoaderWrapper)
+    setattr(system_mod.modules["data"], "create_dataloaders", dataloader_factory)
+    setattr(system_mod.modules["uncertainty"], "CalibrationMetrics", CalibrationWrapper)
 
     argv = [
         "eval.py",

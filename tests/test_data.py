@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import data
 
 
-def _make_dataset_dir(tmp_path: str, modalities: list[str], num_samples: int = 4) -> str:
+def _make_dataset_dir(tmp_path: Path, modalities: list[str], num_samples: int = 4) -> str:
     base = tmp_path / "dataset"
     for split in ["train", "val", "test"]:
         split_dir = base / split
@@ -179,17 +179,30 @@ def test_multimodal_dataset_validation_split_keeps_modalities(tmp_path):
 
 
 def test_synthetic_dataset_split_seeding():
-    base_kwargs = {
-        "num_samples": 8,
-        "num_classes": 3,
-        "modality_dims": {"sensor1": 4},
-        "sequence_length": 5,
-        "seed": 123,
-    }
-
-    train_a = data.SyntheticMultimodalDataset(**base_kwargs, split="train")
-    train_b = data.SyntheticMultimodalDataset(**base_kwargs, split="train")
-    val_dataset = data.SyntheticMultimodalDataset(**base_kwargs, split="val")
+    train_a = data.SyntheticMultimodalDataset(
+        num_samples=8,
+        num_classes=3,
+        modality_dims={"sensor1": 4},
+        sequence_length=5,
+        seed=123,
+        split="train",
+    )
+    train_b = data.SyntheticMultimodalDataset(
+        num_samples=8,
+        num_classes=3,
+        modality_dims={"sensor1": 4},
+        sequence_length=5,
+        seed=123,
+        split="train",
+    )
+    val_dataset = data.SyntheticMultimodalDataset(
+        num_samples=8,
+        num_classes=3,
+        modality_dims={"sensor1": 4},
+        sequence_length=5,
+        seed=123,
+        split="val",
+    )
 
     train_features_a, _, _ = train_a[0]
     train_features_b, _, _ = train_b[0]

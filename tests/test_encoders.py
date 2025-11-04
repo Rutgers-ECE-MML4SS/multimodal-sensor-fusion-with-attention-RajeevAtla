@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -82,8 +83,8 @@ class TestSequenceEncoder:
         """Ensure CNN SequenceEncoder raises when required modules are missing."""
         try:
             encoder = SequenceEncoder(**encoder_params, encoder_type="cnn")
-            encoder.conv_net = None
-            encoder.pool = None
+            cast(Any, encoder).conv_net = None
+            cast(Any, encoder).pool = None
 
             with pytest.raises(RuntimeError, match="CNN modules not initialized"):
                 encoder(sequence_data)
@@ -101,10 +102,10 @@ class TestSequenceEncoder:
                 encoder_type="cnn",
                 dropout=0.0,
             )
-            encoder.conv_net = nn.Identity()
-            encoder.pool = nn.AdaptiveAvgPool1d(1)
-            encoder.dropout_layer = nn.Identity()
-            encoder.projection = nn.Identity()
+            cast(Any, encoder).conv_net = nn.Identity()
+            cast(Any, encoder).pool = nn.AdaptiveAvgPool1d(1)
+            cast(Any, encoder).dropout_layer = nn.Identity()
+            cast(Any, encoder).projection = nn.Identity()
 
             sequence = torch.arange(24, dtype=torch.float32).view(2, 3, 4)
             output = encoder(sequence)
@@ -144,15 +145,17 @@ class TestSequenceEncoder:
                 dropout=0.0,
             )
 
+            captured_masks: list[torch.Tensor | None] = []
+
             class IdentityTransformer(nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.last_mask: torch.Tensor | None = None
 
                 def forward(
                     self, x: torch.Tensor, src_key_padding_mask: torch.Tensor | None = None
                 ) -> torch.Tensor:
-                    self.last_mask = src_key_padding_mask
+                    captured_masks.clear()
+                    captured_masks.append(src_key_padding_mask)
                     time_offsets = (
                         torch.arange(x.size(1), device=x.device, dtype=x.dtype)
                         .view(1, -1, 1)
@@ -161,22 +164,24 @@ class TestSequenceEncoder:
                     return x + time_offsets
 
             transformer = IdentityTransformer()
-            encoder.transformer = transformer
-            encoder.input_projection = nn.Identity()
-            encoder.dropout_layer = nn.Identity()
-            encoder.projection = nn.Identity()
+            cast(Any, encoder).transformer = transformer
+            cast(Any, encoder).input_projection = nn.Identity()
+            cast(Any, encoder).dropout_layer = nn.Identity()
+            cast(Any, encoder).projection = nn.Identity()
 
             sequence = torch.arange(40, dtype=torch.float32).view(2, 5, 4)
             lengths = torch.tensor([3, 5])
 
             output = encoder(sequence, lengths)
 
-            assert transformer.last_mask is not None, "Transformer mask should be recorded"
+            assert captured_masks and captured_masks[0] is not None
+            last_mask = captured_masks[0]
+            assert last_mask is not None
             expected_mask = torch.tensor(
                 [[False, False, False, True, True], [False, False, False, False, False]]
             )
-            assert transformer.last_mask.shape == expected_mask.shape
-            assert torch.equal(transformer.last_mask, expected_mask)
+            assert last_mask.shape == expected_mask.shape
+            assert torch.equal(last_mask, expected_mask)
 
             expected_valid = (~expected_mask).unsqueeze(-1).float()
             time_offsets = (
@@ -205,27 +210,26 @@ class TestSequenceEncoder:
                 dropout=0.0,
             )
 
-            class ShiftTransformer(nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.received_mask: torch.Tensor | None = None
+            captured_masks: list[torch.Tensor | None] = []
 
+            class ShiftTransformer(nn.Module):
                 def forward(
                     self, x: torch.Tensor, src_key_padding_mask: torch.Tensor | None = None
                 ) -> torch.Tensor:
-                    self.received_mask = src_key_padding_mask
+                    captured_masks.clear()
+                    captured_masks.append(src_key_padding_mask)
                     return x + 2.0
 
             transformer = ShiftTransformer()
-            encoder.transformer = transformer
-            encoder.input_projection = nn.Identity()
-            encoder.dropout_layer = nn.Identity()
-            encoder.projection = nn.Identity()
+            cast(Any, encoder).transformer = transformer
+            cast(Any, encoder).input_projection = nn.Identity()
+            cast(Any, encoder).dropout_layer = nn.Identity()
+            cast(Any, encoder).projection = nn.Identity()
 
             sequence = torch.arange(24, dtype=torch.float32).view(2, 3, 4)
             output = encoder(sequence)
 
-            assert transformer.received_mask is None
+            assert not captured_masks or captured_masks[0] is None
             expected = (sequence + 2.0).mean(dim=1)
             torch.testing.assert_close(output, expected)
         except NotImplementedError:
@@ -241,8 +245,8 @@ class TestSequenceEncoder:
                 num_layers=1,
                 encoder_type="transformer",
             )
-            encoder.input_projection = None
-            encoder.transformer = None
+            cast(Any, encoder).input_projection = None
+            cast(Any, encoder).transformer = None
 
             sequence = torch.randn(2, 3, 4)
 
