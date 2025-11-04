@@ -6,6 +6,7 @@ Tests basic functionality and interface compliance.
 
 import pytest
 import torch
+import torch.nn as nn
 import sys
 from pathlib import Path
 
@@ -77,6 +78,42 @@ class TestSequenceEncoder:
         except NotImplementedError:
             pytest.skip("CNN SequenceEncoder not implemented yet")
 
+    def test_cnn_missing_modules_raises(self, encoder_params, sequence_data):
+        """Ensure CNN SequenceEncoder raises when required modules are missing."""
+        try:
+            encoder = SequenceEncoder(**encoder_params, encoder_type="cnn")
+            encoder.conv_net = None
+            encoder.pool = None
+
+            with pytest.raises(RuntimeError, match="CNN modules not initialized"):
+                encoder(sequence_data)
+        except NotImplementedError:
+            pytest.skip("CNN SequenceEncoder not implemented yet")
+
+    def test_cnn_encoder_average_pooling_identity_modules(self):
+        """Ensure CNN SequenceEncoder pools over the temporal axis as expected."""
+        try:
+            encoder = SequenceEncoder(
+                input_dim=4,
+                hidden_dim=4,
+                output_dim=4,
+                num_layers=1,
+                encoder_type="cnn",
+                dropout=0.0,
+            )
+            encoder.conv_net = nn.Identity()
+            encoder.pool = nn.AdaptiveAvgPool1d(1)
+            encoder.dropout_layer = nn.Identity()
+            encoder.projection = nn.Identity()
+
+            sequence = torch.arange(24, dtype=torch.float32).view(2, 3, 4)
+            output = encoder(sequence)
+
+            expected = sequence.mean(dim=1)
+            torch.testing.assert_close(output, expected)
+        except NotImplementedError:
+            pytest.skip("CNN SequenceEncoder not implemented yet")
+
     def test_variable_length_sequences(self, encoder_params):
         """Test SequenceEncoder with variable-length sequences."""
         try:
@@ -94,6 +131,125 @@ class TestSequenceEncoder:
             print("✓ Variable-length sequence test passed")
         except NotImplementedError:
             pytest.skip("Variable-length handling not implemented yet")
+
+    def test_transformer_encoder_applies_mask(self):
+        """Ensure transformer SequenceEncoder applies padding mask during pooling."""
+        try:
+            encoder = SequenceEncoder(
+                input_dim=4,
+                hidden_dim=4,
+                output_dim=4,
+                num_layers=1,
+                encoder_type="transformer",
+                dropout=0.0,
+            )
+
+            class IdentityTransformer(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.last_mask: torch.Tensor | None = None
+
+                def forward(
+                    self, x: torch.Tensor, src_key_padding_mask: torch.Tensor | None = None
+                ) -> torch.Tensor:
+                    self.last_mask = src_key_padding_mask
+                    time_offsets = (
+                        torch.arange(x.size(1), device=x.device, dtype=x.dtype)
+                        .view(1, -1, 1)
+                        .expand_as(x)
+                    )
+                    return x + time_offsets
+
+            transformer = IdentityTransformer()
+            encoder.transformer = transformer
+            encoder.input_projection = nn.Identity()
+            encoder.dropout_layer = nn.Identity()
+            encoder.projection = nn.Identity()
+
+            sequence = torch.arange(40, dtype=torch.float32).view(2, 5, 4)
+            lengths = torch.tensor([3, 5])
+
+            output = encoder(sequence, lengths)
+
+            assert transformer.last_mask is not None, "Transformer mask should be recorded"
+            expected_mask = torch.tensor(
+                [[False, False, False, True, True], [False, False, False, False, False]]
+            )
+            assert transformer.last_mask.shape == expected_mask.shape
+            assert torch.equal(transformer.last_mask, expected_mask)
+
+            expected_valid = (~expected_mask).unsqueeze(-1).float()
+            time_offsets = (
+                torch.arange(sequence.size(1), dtype=sequence.dtype)
+                .view(1, -1, 1)
+                .expand_as(sequence)
+            )
+            transformer_out = sequence + time_offsets
+            expected = (transformer_out * expected_valid).sum(dim=1) / expected_valid.sum(
+                dim=1
+            ).clamp_min(1.0)
+
+            torch.testing.assert_close(output, expected)
+        except NotImplementedError:
+            pytest.skip("Transformer SequenceEncoder not implemented yet")
+
+    def test_transformer_encoder_without_lengths_uses_mean_pooling(self):
+        """Transformer encoder should fall back to simple mean pooling when no mask is provided."""
+        try:
+            encoder = SequenceEncoder(
+                input_dim=4,
+                hidden_dim=4,
+                output_dim=4,
+                num_layers=1,
+                encoder_type="transformer",
+                dropout=0.0,
+            )
+
+            class ShiftTransformer(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.received_mask: torch.Tensor | None = None
+
+                def forward(
+                    self, x: torch.Tensor, src_key_padding_mask: torch.Tensor | None = None
+                ) -> torch.Tensor:
+                    self.received_mask = src_key_padding_mask
+                    return x + 2.0
+
+            transformer = ShiftTransformer()
+            encoder.transformer = transformer
+            encoder.input_projection = nn.Identity()
+            encoder.dropout_layer = nn.Identity()
+            encoder.projection = nn.Identity()
+
+            sequence = torch.arange(24, dtype=torch.float32).view(2, 3, 4)
+            output = encoder(sequence)
+
+            assert transformer.received_mask is None
+            expected = (sequence + 2.0).mean(dim=1)
+            torch.testing.assert_close(output, expected)
+        except NotImplementedError:
+            pytest.skip("Transformer SequenceEncoder not implemented yet")
+
+    def test_transformer_encoder_missing_modules_raises(self):
+        """Missing transformer components should raise a descriptive error."""
+        try:
+            encoder = SequenceEncoder(
+                input_dim=4,
+                hidden_dim=4,
+                output_dim=4,
+                num_layers=1,
+                encoder_type="transformer",
+            )
+            encoder.input_projection = None
+            encoder.transformer = None
+
+            sequence = torch.randn(2, 3, 4)
+
+            with pytest.raises(RuntimeError, match="Transformer modules not initialized."):
+                encoder(sequence)
+        except NotImplementedError:
+            pytest.skip("Transformer SequenceEncoder not implemented yet")
 
 
 class TestFrameEncoder:

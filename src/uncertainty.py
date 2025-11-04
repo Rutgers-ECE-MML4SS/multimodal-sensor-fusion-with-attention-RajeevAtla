@@ -401,7 +401,16 @@ class TemperatureScaling(nn.Module):
         labels = labels.detach().to(dtype=torch.long)
 
         if logits.device != self.temperature.device:
-            self.temperature = nn.Parameter(self.temperature.detach().to(logits.device))
+            temp_param = self.temperature
+            if temp_param.device.type == "meta":
+                new_value = torch.ones(
+                    temp_param.shape,
+                    device=logits.device,
+                    dtype=temp_param.dtype,
+                )
+            else:
+                new_value = temp_param.detach().to(device=logits.device)
+            self.temperature = nn.Parameter(new_value)
 
         self.temperature.data = torch.ones_like(self.temperature.data)
 

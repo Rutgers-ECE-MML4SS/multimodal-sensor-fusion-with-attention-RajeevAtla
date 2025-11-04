@@ -152,6 +152,50 @@ def test_uncertainty_weighted_fusion_errors():
         fusion({"mod1": torch.zeros(1, 2)}, {}, torch.ones(1, 1))
 
 
-def test_uncertainty_script_runs(capsys):
+def test_uncertainty_script_runs(capsys, tmp_path, monkeypatch):
+    original_reliability = uncertainty.CalibrationMetrics.reliability_diagram
+    output_path = tmp_path / "cli_reliability.png"
+
+    def patched_reliability(confidences, predictions, labels, num_bins=15, save_path=None):
+        return original_reliability(
+            confidences,
+            predictions,
+            labels,
+            num_bins=num_bins,
+            save_path=output_path,
+        )
+
+    monkeypatch.setattr(
+        uncertainty.CalibrationMetrics,
+        "reliability_diagram",
+        staticmethod(patched_reliability),
+    )
     runpy.run_module("uncertainty", run_name="__main__")
-    assert "Reliability diagram created" in capsys.readouterr().out
+    captured = capsys.readouterr().out
+    assert "Testing calibration metrics..." in captured
+    assert "Reliability diagram created" in captured
+    assert output_path.exists()
+
+
+def test_uncertainty_script_handles_not_implemented(monkeypatch, capsys):
+    def raise_ece(*args, **kwargs):
+        raise NotImplementedError("ece unavailable")
+
+    def raise_reliability(*args, **kwargs):
+        raise NotImplementedError("reliability unavailable")
+
+    monkeypatch.setattr(
+        uncertainty.CalibrationMetrics,
+        "expected_calibration_error",
+        staticmethod(raise_ece),
+    )
+    monkeypatch.setattr(
+        uncertainty.CalibrationMetrics,
+        "reliability_diagram",
+        staticmethod(raise_reliability),
+    )
+
+    runpy.run_module("uncertainty", run_name="__main__")
+    captured = capsys.readouterr().out
+    assert "ECE not implemented yet" in captured
+    assert "Reliability diagram not implemented yet" in captured
