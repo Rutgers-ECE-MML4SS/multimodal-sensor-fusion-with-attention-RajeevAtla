@@ -161,3 +161,39 @@ def test_data_demo_script_runs(capsys):
     )
     assert torch.all(updated_mask == mask)
     assert torch.all(updated_features["mod2"] == 0)
+
+
+def test_multimodal_dataset_validation_split_keeps_modalities(tmp_path):
+    modalities = ["mod1", "mod2", "mod3"]
+    root = _make_dataset_dir(tmp_path, modalities, num_samples=3)
+
+    val_dataset = data.MultimodalDataset(
+        data_dir=root,
+        modalities=modalities,
+        split="val",
+        modality_dropout=0.9,
+    )
+
+    _, _, mask = val_dataset[0]
+    assert torch.all(mask == 1)
+
+
+def test_synthetic_dataset_split_seeding():
+    base_kwargs = {
+        "num_samples": 8,
+        "num_classes": 3,
+        "modality_dims": {"sensor1": 4},
+        "sequence_length": 5,
+        "seed": 123,
+    }
+
+    train_a = data.SyntheticMultimodalDataset(**base_kwargs, split="train")
+    train_b = data.SyntheticMultimodalDataset(**base_kwargs, split="train")
+    val_dataset = data.SyntheticMultimodalDataset(**base_kwargs, split="val")
+
+    train_features_a, _, _ = train_a[0]
+    train_features_b, _, _ = train_b[0]
+    val_features, _, _ = val_dataset[0]
+
+    assert torch.equal(train_features_a["sensor1"], train_features_b["sensor1"])
+    assert not torch.equal(train_features_a["sensor1"], val_features["sensor1"])
