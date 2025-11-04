@@ -30,6 +30,9 @@ jobs:
 
       - name: Run Ruff
         run: uv run ruff check
+        
+      - name: Run ty
+        run: uv run ty check
 
       - name: Run Pytest
         run: uv run pytest --cov=src

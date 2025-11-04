@@ -1,5 +1,5 @@
 [project]
-name = "MMML Assignment 2"
+name = "MMML_Assignment_2"
 version = "0.1.0"
 description = "attention-based multimodal sensor fusion for heterogeneous sensor streams"
 readme = "README.md"
@@ -26,6 +26,7 @@ dependencies = [
     "torchaudio>=2.9.0",
     "torchvision>=0.24.0",
     "tqdm>=4.67.1",
+    "ty>=0.0.1a25",
 ]
 
 [tool.ruff]
