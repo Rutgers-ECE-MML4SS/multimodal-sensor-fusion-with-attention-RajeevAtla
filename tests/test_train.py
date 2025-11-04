@@ -206,3 +206,19 @@ def test_cosine_scheduler_parameters(tmp_path):
     assert isinstance(step_scheduler, torch.optim.lr_scheduler.StepLR)
     assert step_scheduler.step_size == 30
     assert step_scheduler.gamma == 0.1
+
+
+def test_train_entrypoint_executes_main(monkeypatch):
+    calls: list[bool] = []
+
+    def fake_main():
+        calls.append(True)
+
+    lines = Path("src/train.py").read_text().splitlines()
+    start = next(idx for idx, line in enumerate(lines) if line.startswith("if __name__"))
+    block = "\n" * start + "\n".join(lines[start:])
+
+    namespace = {"__name__": "__main__", "main": fake_main}
+    exec(compile(block, "src/train.py", "exec"), namespace)
+
+    assert calls == [True]
