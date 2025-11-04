@@ -15,6 +15,70 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from fusion import EarlyFusion, LateFusion, HybridFusion, build_fusion_model
 
 
+class TestFusionIntegration:
+    """Integration-style tests covering missing-modality fallbacks and adaptive weights."""
+
+    def test_late_fusion_missing_modality_fallback(self):
+        """LateFusion should fallback to uniform weights when modalities are missing."""
+        torch.manual_seed(0)
+        modality_dims = {"video": 4, "imu": 4}
+        model = LateFusion(modality_dims, num_classes=3, hidden_dim=8, dropout=0.0)
+        model.eval()
+
+        features = {
+            "video": torch.randn(2, 4),
+            "imu": torch.randn(2, 4),
+        }
+        mask = torch.tensor([[1.0, 0.0], [0.0, 0.0]], dtype=torch.float32)
+
+        fused_logits, per_mod_logits = model(features, mask)
+
+        assert torch.allclose(
+            fused_logits[0], per_mod_logits["video"][0], atol=1e-6
+        ), "Available modality should dominate fused output."
+
+        expected_uniform = (
+            per_mod_logits["video"][1] + per_mod_logits["imu"][1]
+        ) / 2.0
+        assert torch.allclose(
+            fused_logits[1], expected_uniform, atol=1e-6
+        ), "Fallback should average logits when all modalities missing."
+
+    def test_hybrid_fusion_adaptive_weights(self):
+        """HybridFusion adaptive weights should respect modality availability."""
+        torch.manual_seed(0)
+        modality_dims = {"video": 4, "imu": 4}
+        model = HybridFusion(
+            modality_dims, num_classes=3, hidden_dim=8, num_heads=1, dropout=0.0
+        )
+        model.eval()
+
+        features = {
+            "video": torch.randn(3, 4),
+            "imu": torch.randn(3, 4),
+        }
+        mask = torch.tensor(
+            [[1.0, 1.0], [1.0, 0.0], [0.0, 0.0]], dtype=torch.float32
+        )
+
+        logits, attention_info = model(
+            features, mask, return_attention=True
+        )
+        fusion_weights = attention_info["fusion_weights"]
+
+        assert fusion_weights.shape == mask.shape
+        assert torch.allclose(
+            fusion_weights[0].sum(), torch.tensor(1.0), atol=1e-6
+        ), "Weights should remain normalized when all modalities present."
+        assert torch.allclose(
+            fusion_weights[1], torch.tensor([1.0, 0.0]), atol=1e-6
+        ), "Missing modality should receive zero weight."
+        assert torch.allclose(
+            fusion_weights[2], torch.full((2,), 0.5), atol=1e-6
+        ), "All-missing case should fallback to uniform distribution."
+        assert not torch.isnan(logits).any(), "Logits should stay finite."
+
+
 class TestFusionInterfaces:
     """Test that fusion models follow expected interfaces."""
 
