@@ -28,6 +28,7 @@ ENV/
 env.bak/
 venv.bak/
 .venv/
+AGENTS.md
 
 # PyCharm
 .idea/
