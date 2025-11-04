@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import torch
+import torch.nn as nn
 from omegaconf import OmegaConf
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -148,11 +149,60 @@ def test_train_main_invocation(tmp_path, monkeypatch):
     assert "best_model_path" in saved and "best_val_loss" in saved
 
 
-def test_forward_handles_tuple_output(tmp_path):
+def test_forward_handles_tuple_output(tmp_path, monkeypatch):
     config = _base_config(tmp_path)
     config.model.fusion_type = "late"
+
+    class TupleFusion(nn.Module):
+        def forward(self, feats, mask=None):
+            batch_size = next(iter(feats.values())).shape[0]
+            logits = torch.zeros(batch_size, config.model.output_dim)
+            return logits, {"sensor": logits}
+
+    monkeypatch.setattr(
+        train,
+        "build_fusion_model",
+        lambda *args, **kwargs: TupleFusion(),
+    )
+
     module = train.MultimodalFusionModule(config)
     features, _, mask = _fake_batch()
-    module.fusion_model = lambda feats, mask=None: (torch.zeros(features.shape[0], config.model.output_dim), {})
     logits = module.forward(features, mask)
     assert logits.shape[0] == 2
+
+
+def test_training_step_logs_metrics(tmp_path):
+    config = _base_config(tmp_path)
+    module = train.MultimodalFusionModule(config)
+    captured = {}
+
+    def fake_log(name, value, **kwargs):
+        captured.setdefault(name, []).append((value, kwargs))
+
+    module.log = fake_log  # type: ignore[assignment]
+
+    batch = _fake_batch()
+    loss = module.training_step(batch, 0)
+    assert loss.requires_grad
+    assert "train/loss" in captured
+    assert "train/acc" in captured
+    assert captured["train/loss"][0][0] is loss
+    assert captured["train/acc"][0][1]["on_epoch"]
+
+
+def test_cosine_scheduler_parameters(tmp_path):
+    config = _base_config(tmp_path)
+    module = train.MultimodalFusionModule(config)
+    optim_config = module.configure_optimizers()
+    scheduler = optim_config["lr_scheduler"]["scheduler"]
+    assert isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR)
+    assert scheduler.T_max == config.training.max_epochs
+    assert scheduler.eta_min == pytest.approx(config.training.learning_rate / 100)
+
+    config_step = _base_config(tmp_path, scheduler="step")
+    module_step = train.MultimodalFusionModule(config_step)
+    step_config = module_step.configure_optimizers()
+    step_scheduler = step_config["lr_scheduler"]["scheduler"]
+    assert isinstance(step_scheduler, torch.optim.lr_scheduler.StepLR)
+    assert step_scheduler.step_size == 30
+    assert step_scheduler.gamma == 0.1
