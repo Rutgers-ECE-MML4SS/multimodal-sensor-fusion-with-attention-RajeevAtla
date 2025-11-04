@@ -8,7 +8,7 @@ Implements:
 
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 class CrossModalAttention(nn.Module):
@@ -43,11 +43,12 @@ class CrossModalAttention(nn.Module):
         assert hidden_dim % num_heads == 0, \
             f"hidden_dim ({hidden_dim}) must be divisible by num_heads ({num_heads})"
         
-        # TODO: Implement multi-head attention projections
-        # Hint: Use nn.Linear for Q, K, V projections
-        # Query from modality A, Key and Value from modality B
-        
-        raise NotImplementedError("Implement cross-modal attention projections")
+        self.query_proj = nn.Linear(query_dim, hidden_dim)
+        self.key_proj = nn.Linear(key_dim, hidden_dim)
+        self.value_proj = nn.Linear(key_dim, hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.scale = self.head_dim ** -0.5
     
     def forward(
         self,
@@ -70,17 +71,50 @@ class CrossModalAttention(nn.Module):
             attention_weights: (batch_size, num_heads, 1, 1) - attention scores
         """
         batch_size = query.size(0)
+        squeeze_query = False
+        squeeze_key = False
         
-        # TODO: Implement multi-head attention computation
-        # Steps:
-        #   1. Project query, key, value to (batch, num_heads, seq_len, head_dim)
-        #   2. Compute attention scores: Q @ K^T / sqrt(head_dim)
-        #   3. Apply mask if provided (set masked positions to -inf before softmax)
-        #   4. Apply softmax to get attention weights
-        #   5. Apply attention to values: attn_weights @ V
-        #   6. Reshape and project back to hidden_dim
+        if query.dim() == 2:
+            query = query.unsqueeze(1)
+            squeeze_query = True
+        if key.dim() == 2:
+            key = key.unsqueeze(1)
+            squeeze_key = True
+        if value.dim() == 2:
+            value = value.unsqueeze(1)
         
-        raise NotImplementedError("Implement cross-modal attention forward pass")
+        q_len = query.size(1)
+        k_len = key.size(1)
+        
+        q = self.query_proj(query)  # (batch, q_len, hidden_dim)
+        k = self.key_proj(key)      # (batch, k_len, hidden_dim)
+        v = self.value_proj(value)  # (batch, k_len, hidden_dim)
+        
+        q = q.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(batch_size, k_len, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(batch_size, k_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        
+        if mask is not None:
+            if mask.dim() == 1:
+                mask = mask.unsqueeze(1)
+            mask = mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, k_len)
+            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+        
+        attn_weights = torch.softmax(attn_scores, dim=-1)
+        attn_weights = torch.nan_to_num(attn_weights, nan=0.0, posinf=0.0, neginf=0.0)
+        attn_weights = self.dropout(attn_weights)
+        
+        attended = torch.matmul(attn_weights, v)  # (batch, num_heads, q_len, head_dim)
+        attended = attended.transpose(1, 2).contiguous().view(batch_size, q_len, self.hidden_dim)
+        attended = self.out_proj(attended)
+        
+        if squeeze_query:
+            attended = attended.squeeze(1)
+        if squeeze_key:
+            attn_weights = attn_weights[:, :, :, :1]
+        return attended, attn_weights
 
 
 class TemporalAttention(nn.Module):
@@ -110,10 +144,12 @@ class TemporalAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = hidden_dim // num_heads
         
-        # TODO: Implement self-attention over temporal dimension
-        # Hint: Similar to CrossModalAttention but Q, K, V from same modality
-        
-        raise NotImplementedError("Implement temporal attention")
+        self.query_proj = nn.Linear(feature_dim, hidden_dim)
+        self.key_proj = nn.Linear(feature_dim, hidden_dim)
+        self.value_proj = nn.Linear(feature_dim, hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.scale = self.head_dim ** -0.5
     
     def forward(
         self,
@@ -131,14 +167,36 @@ class TemporalAttention(nn.Module):
             attended_sequence: (batch_size, seq_len, hidden_dim) - attended features
             attention_weights: (batch_size, num_heads, seq_len, seq_len)
         """
-        # TODO: Implement temporal self-attention
-        # Steps:
-        #   1. Project sequence to Q, K, V
-        #   2. Compute self-attention over sequence length
-        #   3. Apply mask for variable-length sequences
-        #   4. Return attended sequence and weights
+        batch_size, seq_len, _ = sequence.shape
         
-        raise NotImplementedError("Implement temporal attention forward pass")
+        q = self.query_proj(sequence)
+        k = self.key_proj(sequence)
+        v = self.value_proj(sequence)
+        
+        q = q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        
+        if mask is not None:
+            if mask.dim() == 1:
+                mask = mask.unsqueeze(0)
+            mask = mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, seq_len)
+            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+        
+        attn_weights = torch.softmax(attn_scores, dim=-1)
+        attn_weights = torch.nan_to_num(attn_weights, nan=0.0, posinf=0.0, neginf=0.0)
+        attn_weights = self.dropout(attn_weights)
+        
+        attended = torch.matmul(attn_weights, v)
+        attended = attended.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_dim)
+        attended = self.out_proj(attended)
+        
+        if mask is not None:
+            attended = attended * mask.unsqueeze(-1)
+        
+        return attended, attn_weights
     
     def pool_sequence(
         self,
@@ -155,12 +213,16 @@ class TemporalAttention(nn.Module):
         Returns:
             pooled: (batch_size, hidden_dim) - fixed-size representation
         """
-        # TODO: Implement attention-based pooling
-        # Option 1: Weighted average using mean attention weights
-        # Option 2: Learn pooling query vector
-        # Option 3: Take output at special [CLS] token position
+        if attention_weights.dim() != 4:
+            raise ValueError(f"Expected attention weights with 4 dims, got {attention_weights.shape}")
         
-        raise NotImplementedError("Implement attention-based pooling")
+        # Average across heads and query positions to obtain a distribution over timesteps
+        mean_weights = attention_weights.mean(dim=1)  # (batch, seq_len, seq_len)
+        pooling_weights = mean_weights.mean(dim=1)    # (batch, seq_len)
+        pooling_weights = pooling_weights / (pooling_weights.sum(dim=1, keepdim=True) + 1e-8)
+        
+        pooled = torch.bmm(pooling_weights.unsqueeze(1), sequence).squeeze(1)
+        return pooled
 
 
 class PairwiseModalityAttention(nn.Module):
@@ -191,11 +253,28 @@ class PairwiseModalityAttention(nn.Module):
         self.num_modalities = len(self.modality_names)
         self.hidden_dim = hidden_dim
         
-        # TODO: Create CrossModalAttention for each modality pair
-        # Hint: Use nn.ModuleDict with keys like "video_to_audio"
-        # For each pair (A, B), create attention A->B and B->A
+        self.projections = nn.ModuleDict({
+            modality: nn.Sequential(
+                nn.Linear(dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout)
+            )
+            for modality, dim in modality_dims.items()
+        })
         
-        raise NotImplementedError("Implement pairwise modality attention")
+        attention_layers = {}
+        for query_mod in self.modality_names:
+            for key_mod in self.modality_names:
+                if query_mod == key_mod:
+                    continue
+                attention_layers[f"{query_mod}_to_{key_mod}"] = CrossModalAttention(
+                    query_dim=hidden_dim,
+                    key_dim=hidden_dim,
+                    hidden_dim=hidden_dim,
+                    num_heads=num_heads,
+                    dropout=dropout
+                )
+        self.attention_layers = nn.ModuleDict(attention_layers)
     
     def forward(
         self,
@@ -214,16 +293,54 @@ class PairwiseModalityAttention(nn.Module):
             attended_features: Dict of {modality_name: attended_features}
             attention_maps: Dict of {f"{mod_a}_to_{mod_b}": attention_weights}
         """
-        # TODO: Implement pairwise attention
-        # Steps:
-        #   1. For each modality pair (A, B):
-        #      - Apply attention A->B (A attends to B)
-        #      - Apply attention B->A (B attends to A)
-        #   2. Aggregate attended features (options: sum, concat, gating)
-        #   3. Handle missing modalities using mask
-        #   4. Return attended features and attention maps for visualization
+        if not self.modality_names:
+            raise ValueError("No modalities provided for PairwiseModalityAttention.")
         
-        raise NotImplementedError("Implement pairwise attention forward pass")
+        reference_modality = self.modality_names[0]
+        batch_size = modality_features[reference_modality].size(0)
+        device = modality_features[reference_modality].device
+        dtype = modality_features[reference_modality].dtype
+        
+        if modality_mask is None:
+            modality_mask = torch.ones(batch_size, self.num_modalities, device=device, dtype=dtype)
+        else:
+            modality_mask = modality_mask.to(device=device, dtype=dtype)
+        
+        projected = {
+            modality: self.projections[modality](modality_features[modality].to(device))
+            for modality in self.modality_names
+        }
+        
+        aggregated = {modality: [projected[modality]] for modality in self.modality_names}
+        attention_maps = {}
+        
+        for query_mod in self.modality_names:
+            for key_mod in self.modality_names:
+                if query_mod == key_mod:
+                    continue
+                
+                attention_key = f"{query_mod}_to_{key_mod}"
+                if attention_key not in self.attention_layers:
+                    continue
+                
+                key_index = self.modality_names.index(key_mod)
+                key_mask = modality_mask[:, key_index] if modality_mask is not None else None
+                
+                attended, weights = self.attention_layers[attention_key](
+                    projected[query_mod],
+                    projected[key_mod],
+                    projected[key_mod],
+                    mask=key_mask
+                )
+                aggregated[query_mod].append(attended)
+                attention_maps[attention_key] = weights
+        
+        attended_features = {}
+        for idx, modality in enumerate(self.modality_names):
+            stacked = torch.stack(aggregated[modality], dim=0).mean(dim=0)
+            attended_features[modality] = stacked * modality_mask[:, idx].unsqueeze(-1)
+        
+        return attended_features, attention_maps
 
 
 def visualize_attention(
@@ -242,11 +359,47 @@ def visualize_attention(
     import matplotlib.pyplot as plt
     import numpy as np
     
-    # TODO: Implement attention visualization
-    # Create heatmap showing which modalities attend to which
-    # Useful for understanding fusion behavior
+    if isinstance(attention_weights, torch.Tensor):
+        tensor = attention_weights.detach().float().cpu()
+    else:
+        tensor = torch.as_tensor(attention_weights, dtype=torch.float32)
     
-    raise NotImplementedError("Implement attention visualization")
+    if tensor.dim() == 0:
+        tensor = tensor.unsqueeze(0)
+    if tensor.dim() == 1:
+        tensor = tensor.unsqueeze(0)
+    if tensor.dim() == 3:
+        tensor = tensor.mean(dim=0)
+    while tensor.dim() > 2:
+        tensor = tensor.mean(dim=0)
+    
+    heatmap = tensor.numpy()
+    if heatmap.ndim != 2:
+        heatmap = np.expand_dims(heatmap, axis=0)
+    
+    fig, ax = plt.subplots(figsize=(4 + 0.5 * heatmap.shape[1], 4))
+    im = ax.imshow(heatmap, cmap='viridis', aspect='auto')
+    
+    num_queries, num_keys = heatmap.shape
+    query_labels = modality_names[:num_queries]
+    key_labels = modality_names[:num_keys]
+    
+    ax.set_xticks(np.arange(num_keys))
+    ax.set_yticks(np.arange(num_queries))
+    ax.set_xticklabels(key_labels, rotation=45, ha='right')
+    ax.set_yticklabels(query_labels)
+    ax.set_xlabel('Key Modality')
+    ax.set_ylabel('Query Modality')
+    ax.set_title('Cross-Modal Attention Weights')
+    
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    plt.tight_layout()
+    
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+    else:
+        plt.show()
 
 
 if __name__ == '__main__':

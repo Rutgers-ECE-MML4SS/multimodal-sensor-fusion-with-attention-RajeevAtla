@@ -42,40 +42,53 @@ class SequenceEncoder(nn.Module):
         self.encoder_type = encoder_type
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
-        
-        # TODO: Implement sequence encoder
-        # Choose ONE of the following architectures:
+        self.dropout_layer = nn.Dropout(dropout)
         
         if encoder_type == 'lstm':
-            # TODO: Implement LSTM encoder
-            # self.rnn = nn.LSTM(input_dim, hidden_dim, num_layers, 
-            #                    batch_first=True, dropout=dropout)
-            # self.projection = nn.Linear(hidden_dim, output_dim)
-            pass
+            self.rnn = nn.LSTM(
+                input_dim,
+                hidden_dim,
+                num_layers=num_layers,
+                batch_first=True,
+                dropout=dropout if num_layers > 1 else 0.0,
+            )
+            self.projection = nn.Linear(hidden_dim, output_dim)
             
         elif encoder_type == 'gru':
-            # TODO: Implement GRU encoder
-            # Similar to LSTM
-            pass
+            self.rnn = nn.GRU(
+                input_dim,
+                hidden_dim,
+                num_layers=num_layers,
+                batch_first=True,
+                dropout=dropout if num_layers > 1 else 0.0,
+            )
+            self.projection = nn.Linear(hidden_dim, output_dim)
             
         elif encoder_type == 'cnn':
-            # TODO: Implement 1D CNN encoder
-            # Stack of Conv1d -> BatchNorm -> ReLU -> Pool
-            # Example:
-            # self.conv1 = nn.Conv1d(input_dim, hidden_dim, kernel_size=3, padding=1)
-            # self.conv2 = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1)
-            # self.pool = nn.AdaptiveAvgPool1d(1)
-            pass
+            self.conv_net = nn.Sequential(
+                nn.Conv1d(input_dim, hidden_dim, kernel_size=3, padding=1),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU()
+            )
+            self.pool = nn.AdaptiveAvgPool1d(1)
+            self.projection = nn.Linear(hidden_dim, output_dim)
             
         elif encoder_type == 'transformer':
-            # TODO: Implement Transformer encoder
-            # encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=4)
-            # self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-            pass
+            self.input_projection = nn.Linear(input_dim, hidden_dim)
+            nhead = 4 if hidden_dim % 4 == 0 else 1
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=nhead,
+                dropout=dropout,
+                batch_first=True
+            )
+            self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+            self.projection = nn.Linear(hidden_dim, output_dim)
         else:
             raise ValueError(f"Unknown encoder type: {encoder_type}")
-        
-        raise NotImplementedError(f"Implement {encoder_type} sequence encoder")
     
     def forward(
         self,
@@ -92,11 +105,67 @@ class SequenceEncoder(nn.Module):
         Returns:
             encoding: (batch_size, output_dim) - fixed-size embedding
         """
-        # TODO: Implement forward pass based on encoder_type
-        # Handle variable-length sequences if lengths provided
-        # Return fixed-size embedding via pooling or taking last hidden state
+        if sequence.dim() != 3:
+            raise ValueError(f"Expected 3D input sequence, got shape {sequence.shape}")
         
-        raise NotImplementedError("Implement sequence encoder forward pass")
+        batch_size, seq_len, _ = sequence.shape
+        device = sequence.device
+        
+        if self.encoder_type in ['lstm', 'gru']:
+            rnn_input = sequence
+            enforce_lengths = lengths is not None
+            
+            if enforce_lengths:
+                lengths_cpu = lengths.to(device=sequence.device).to(torch.int64).cpu()
+                packed = nn.utils.rnn.pack_padded_sequence(
+                    rnn_input,
+                    lengths_cpu,
+                    batch_first=True,
+                    enforce_sorted=False
+                )
+                outputs, hidden = self.rnn(packed)
+                outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True, total_length=seq_len)
+            else:
+                outputs, hidden = self.rnn(rnn_input)
+            
+            if self.encoder_type == 'lstm':
+                hidden_state = hidden[0]
+            else:
+                hidden_state = hidden
+            
+            final_state = hidden_state[-1]  # (batch, hidden_dim)
+            encoding = self.projection(self.dropout_layer(final_state))
+            return encoding
+        
+        if self.encoder_type == 'cnn':
+            x = sequence.transpose(1, 2)  # (batch, input_dim, seq_len)
+            x = self.conv_net(x)
+            x = self.pool(x).squeeze(-1)
+            encoding = self.projection(self.dropout_layer(x))
+            return encoding
+        
+        if self.encoder_type == 'transformer':
+            x = self.input_projection(sequence)
+            if lengths is not None:
+                lengths = lengths.to(device=sequence.device, dtype=torch.long)
+                range_tensor = torch.arange(seq_len, device=sequence.device).unsqueeze(0).expand(batch_size, -1)
+                src_key_padding_mask = range_tensor >= lengths.unsqueeze(1)
+            else:
+                src_key_padding_mask = None
+            
+            transformer_output = self.transformer(x, src_key_padding_mask=src_key_padding_mask)
+            
+            if src_key_padding_mask is not None:
+                valid_mask = (~src_key_padding_mask).unsqueeze(-1).float()
+                pooled = transformer_output * valid_mask
+                pooled = pooled.sum(dim=1) / (valid_mask.sum(dim=1).clamp_min(1.0))
+            else:
+                pooled = transformer_output.mean(dim=1)
+            
+            encoding = self.projection(self.dropout_layer(pooled))
+            return encoding
+        
+        raise ValueError(f"Unsupported encoder type: {self.encoder_type}")
 
 
 class FrameEncoder(nn.Module):
@@ -124,26 +193,26 @@ class FrameEncoder(nn.Module):
         """
         super().__init__()
         self.temporal_pooling = temporal_pooling
-        
-        # TODO: Implement frame encoder
-        # 1. Frame-level processing (optional MLP)
-        # 2. Temporal aggregation (pooling or attention)
+        self.frame_processor = nn.Sequential(
+            nn.Linear(frame_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
         
         if temporal_pooling == 'attention':
-            # TODO: Implement attention-based pooling
-            # Learn which frames are important
-            # self.attention = nn.Linear(frame_dim, 1)
-            pass
+            self.attention = nn.Linear(hidden_dim, 1)
         elif temporal_pooling in ['average', 'max']:
             # Simple pooling, no learnable parameters needed
-            pass
+            self.attention = None
         else:
             raise ValueError(f"Unknown pooling: {temporal_pooling}")
         
-        # TODO: Add projection layer
-        # self.projection = nn.Sequential(...)
-        
-        raise NotImplementedError("Implement frame encoder")
+        self.projection = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, output_dim)
+        )
     
     def forward(
         self,
@@ -160,12 +229,35 @@ class FrameEncoder(nn.Module):
         Returns:
             encoding: (batch_size, output_dim) - video-level embedding
         """
-        # TODO: Implement forward pass
-        # 1. Process frames (optional)
-        # 2. Apply temporal pooling
-        # 3. Project to output dimension
+        if frames.dim() != 3:
+            raise ValueError(f"Expected 3D frame tensor, got shape {frames.shape}")
         
-        raise NotImplementedError("Implement frame encoder forward pass")
+        processed = self.frame_processor(frames)
+        device = processed.device
+        
+        if mask is not None:
+            mask = mask.to(device=device, dtype=processed.dtype)
+        
+        if self.temporal_pooling == 'attention':
+            pooled = self.attention_pool(processed, mask)
+        elif self.temporal_pooling == 'average':
+            if mask is None:
+                pooled = processed.mean(dim=1)
+            else:
+                weights = mask.unsqueeze(-1)
+                pooled = (processed * weights).sum(dim=1) / (weights.sum(dim=1).clamp_min(1e-8))
+        elif self.temporal_pooling == 'max':
+            if mask is None:
+                pooled, _ = processed.max(dim=1)
+            else:
+                masked_frames = processed.masked_fill(mask.unsqueeze(-1) == 0, float('-inf'))
+                pooled, _ = masked_frames.max(dim=1)
+                pooled = torch.nan_to_num(pooled, nan=0.0, neginf=0.0)
+        else:
+            raise ValueError(f"Unknown pooling strategy: {self.temporal_pooling}")
+        
+        encoding = self.projection(pooled)
+        return encoding
     
     def attention_pool(
         self,
@@ -182,13 +274,15 @@ class FrameEncoder(nn.Module):
         Returns:
             pooled: (batch_size, frame_dim) - attended frame features
         """
-        # TODO: Implement attention pooling
-        # 1. Compute attention scores for each frame
-        # 2. Apply mask if provided
-        # 3. Softmax to get weights
-        # 4. Weighted sum of frames
+        scores = self.attention(frames)  # (batch, num_frames, 1)
         
-        raise NotImplementedError("Implement attention pooling")
+        if mask is not None:
+            scores = scores.masked_fill(mask.unsqueeze(-1) == 0, float('-inf'))
+        
+        weights = torch.softmax(scores, dim=1)
+        weights = torch.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
+        pooled = (weights * frames).sum(dim=1)
+        return pooled
 
 
 class SimpleMLPEncoder(nn.Module):
@@ -219,27 +313,19 @@ class SimpleMLPEncoder(nn.Module):
         """
         super().__init__()
         
-        # TODO: Implement MLP encoder
-        # Architecture: Input -> [Linear -> BatchNorm -> ReLU -> Dropout] x num_layers -> Output
-        
         layers = []
         current_dim = input_dim
         
-        # TODO: Add hidden layers
-        # for i in range(num_layers):
-        #     layers.append(nn.Linear(current_dim, hidden_dim))
-        #     if batch_norm:
-        #         layers.append(nn.BatchNorm1d(hidden_dim))
-        #     layers.append(nn.ReLU())
-        #     layers.append(nn.Dropout(dropout))
-        #     current_dim = hidden_dim
+        for _ in range(num_layers):
+            layers.append(nn.Linear(current_dim, hidden_dim))
+            if batch_norm:
+                layers.append(nn.BatchNorm1d(hidden_dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+            current_dim = hidden_dim
         
-        # TODO: Add output layer
-        # layers.append(nn.Linear(current_dim, output_dim))
-        
-        # self.encoder = nn.Sequential(*layers)
-        
-        raise NotImplementedError("Implement MLP encoder")
+        layers.append(nn.Linear(current_dim, output_dim))
+        self.encoder = nn.Sequential(*layers)
     
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         """
@@ -251,10 +337,9 @@ class SimpleMLPEncoder(nn.Module):
         Returns:
             encoding: (batch_size, output_dim) - encoded features
         """
-        # TODO: Implement forward pass
-        # return self.encoder(features)
-        
-        raise NotImplementedError("Implement MLP encoder forward pass")
+        if features.dim() != 2:
+            raise ValueError(f"Expected 2D feature tensor, got shape {features.shape}")
+        return self.encoder(features)
 
 
 def build_encoder(
@@ -277,12 +362,6 @@ def build_encoder(
     """
     if encoder_config is None:
         encoder_config = {}
-    
-    # TODO: Implement encoder selection logic
-    # Example heuristics:
-    # - 'video' -> FrameEncoder
-    # - 'imu', 'audio', 'mocap' -> SequenceEncoder
-    # - Pre-extracted features -> SimpleMLPEncoder
     
     if modality in ['video', 'frames']:
         return FrameEncoder(
