@@ -1,5 +1,7 @@
 import json
 import sys
+import runpy
+import types
 from pathlib import Path
 
 import pytest
@@ -114,21 +116,14 @@ def test_compute_modality_importance_handles_missing_data():
     assert importance["B"] == 0.0
 
 
-def test_eval_main_cli(tmp_path, capsys):
-    import argparse
-    import json as json_mod
-    import numpy as np
+def _configure_cli_mocks(monkeypatch, tmp_path, missing: bool = False):
+    checkpoint = tmp_path / "model.ckpt"
+    checkpoint.write_text("dummy")
+    output_dir = tmp_path / "outputs"
 
-    metrics = {"accuracy": 1.0, "f1_macro": 1.0, "loss": 0.0, "num_samples": 1}
-    predictions = (
-        torch.zeros(1, dtype=torch.long),
-        torch.zeros(1, dtype=torch.long),
-        torch.ones(1),
-    )
-
-    class DummyModel:
+    class DummyLightningModel:
         def __init__(self):
-            dataset = type(
+            dataset_cfg = type(
                 "DatasetCfg",
                 (),
                 {
@@ -138,9 +133,9 @@ def test_eval_main_cli(tmp_path, capsys):
                     "batch_size": 1,
                     "num_workers": 0,
                 },
-            )
-            model = type("ModelCfg", (), {"fusion_type": "hybrid"})
-            self.config = type("Config", (), {"dataset": dataset, "model": model})
+            )()
+            model_cfg = type("ModelCfg", (), {"fusion_type": "hybrid"})()
+            self.config = type("Config", (), {"dataset": dataset_cfg, "model": model_cfg})()
 
         def eval(self):
             return self
@@ -148,34 +143,179 @@ def test_eval_main_cli(tmp_path, capsys):
         def to(self, device):
             return self
 
-    globals_dict = {
-        "__name__": "__main__",
-        "__file__": str(Path("src/eval.py")),
-        "torch": torch,
-        "np": np,
-        "F": torch.nn.functional,
-        "json": json_mod,
-        "Path": Path,
-        "argparse": argparse,
-        "tqdm": lambda iterable, **kwargs: iterable,
-        "MultimodalFusionModule": type(
-            "Loader", (), {"load_from_checkpoint": staticmethod(lambda _path: DummyModel())}
-        ),
-        "create_dataloaders": lambda **kwargs: ([None], [None], [None]),
-        "CalibrationMetrics": type(
-            "Cal", (), {"expected_calibration_error": staticmethod(lambda *args, **kwargs: 0.0)}
-        ),
-        "evaluate_model": lambda *args, **kwargs: (metrics, predictions),
-        "evaluate_missing_modalities": lambda *args, **kwargs: {
-            "full_modalities": {"accuracy": 1.0},
-            "single_modalities": {"mod0": {"accuracy": 1.0}},
-            "all_combinations": {"mod0": {"accuracy": 1.0}},
-            "modality_importance": {"mod0": 1.0},
-        },
-        "save_results_json": lambda results, path: Path(path).write_text(
-            json_mod.dumps(results)
-        ),
+    class LoaderWrapper:
+        @staticmethod
+        def load_from_checkpoint(path):
+            assert Path(path) == checkpoint
+            return DummyLightningModel()
+
+    metrics = {"accuracy": 0.9, "f1_macro": 0.8, "loss": 0.2, "num_samples": 2}
+    predictions = (
+        torch.tensor([0, 1]),
+        torch.tensor([0, 1]),
+        torch.tensor([0.6, 0.7]),
+    )
+
+    monkeypatch.setattr(evaluation, "MultimodalFusionModule", LoaderWrapper)
+    monkeypatch.setattr(
+        evaluation,
+        "create_dataloaders",
+        lambda **_: (["train"], ["val"], ["test_loader"]),
+    )
+    monkeypatch.setattr(
+        evaluation,
+        "evaluate_model",
+        lambda *args, **kwargs: (metrics, predictions),
+    )
+
+    missing_results = {
+        "full_modalities": {"accuracy": 0.85},
+        "single_modalities": {"mod0": {"accuracy": 0.8}},
+        "all_combinations": {"mod0": {"accuracy": 0.8}},
+        "modality_importance": {"mod0": 1.0},
     }
-    exec(Path("src/eval.py").read_text(), globals_dict)
-    output = capsys.readouterr().out
-    assert "Evaluation complete!" in output
+
+    evaluate_missing_spy = {"called": False}
+
+    def fake_missing(*args, **kwargs):
+        evaluate_missing_spy["called"] = True
+        return missing_results
+
+    monkeypatch.setattr(
+        evaluation,
+        "evaluate_missing_modalities",
+        fake_missing if missing else lambda *a, **k: pytest.fail(
+            "Missing modality branch should not execute without flag"
+        ),
+    )
+
+    class DummyCalibration:
+        @staticmethod
+        def expected_calibration_error(*args, **kwargs):
+            return 0.05
+
+    monkeypatch.setattr(evaluation, "CalibrationMetrics", DummyCalibration)
+
+    argv = [
+        "eval.py",
+        "--checkpoint",
+        str(checkpoint),
+        "--output_dir",
+        str(output_dir),
+    ]
+    if missing:
+        argv.append("--missing_modality_test")
+    monkeypatch.setattr(sys, "argv", argv)
+
+    return output_dir, missing_results, evaluate_missing_spy
+
+
+def test_eval_main_cli_standard(tmp_path, monkeypatch, capsys):
+    output_dir, _, evaluate_missing_spy = _configure_cli_mocks(monkeypatch, tmp_path)
+    evaluation.main()
+
+    captured = capsys.readouterr().out
+    assert "Standard Evaluation" in captured
+    assert "ECE" in captured
+    assert not evaluate_missing_spy["called"]
+
+    results_path = output_dir / "evaluation_results.json"
+    assert results_path.exists()
+    saved = json.loads(results_path.read_text())
+    assert saved["test_accuracy"] == 0.9
+
+
+def test_eval_main_cli_missing_modalities(tmp_path, monkeypatch, capsys):
+    output_dir, missing_results, evaluate_missing_spy = _configure_cli_mocks(
+        monkeypatch, tmp_path, missing=True
+    )
+    evaluation.main()
+
+    captured = capsys.readouterr().out
+    assert "Missing Modality Robustness Test" in captured
+    assert evaluate_missing_spy["called"]
+    assert "Summary" in captured
+
+    missing_path = output_dir / "missing_modality.json"
+    standard_path = output_dir / "evaluation_results.json"
+    assert missing_path.exists()
+    assert standard_path.exists()
+    saved_missing = json.loads(missing_path.read_text())
+    assert saved_missing == missing_results
+
+
+def test_eval_script_entrypoint_runs(tmp_path, monkeypatch, capsys):
+    import sys as system_mod
+
+    checkpoint = tmp_path / "script.ckpt"
+    checkpoint.write_text("dummy")
+    output_dir = tmp_path / "script_output"
+
+    class LightningWrapper(DummyModel):
+        def __init__(self):
+            super().__init__(num_modalities=1, num_classes=3)
+            dataset_cfg = type(
+                "DatasetCfg",
+                (),
+                {
+                    "name": "synthetic",
+                    "data_dir": "",
+                    "modalities": ["mod0"],
+                    "batch_size": 2,
+                    "num_workers": 0,
+                },
+            )()
+            model_cfg = type("ModelCfg", (), {"fusion_type": "hybrid"})()
+            self.config = type("Config", (), {"dataset": dataset_cfg, "model": model_cfg})()
+
+    class LoaderWrapper:
+        @staticmethod
+        def load_from_checkpoint(path):
+            assert Path(path) == checkpoint
+            return LightningWrapper()
+
+    def dataloader_factory(**kwargs):
+        batch = _make_batch(batch_size=2, num_modalities=1)
+        loader = [batch]
+        return loader, loader, loader
+
+    class CalibrationWrapper:
+        @staticmethod
+        def expected_calibration_error(*args, **kwargs):
+            return 0.02
+
+    tqdm_stub = types.ModuleType("tqdm")
+
+    def passthrough(iterable, **kwargs):
+        return iterable
+
+    tqdm_stub.tqdm = passthrough
+
+    monkeypatch.setitem(system_mod.modules, "tqdm", tqdm_stub)
+    monkeypatch.setitem(system_mod.modules, "train", types.ModuleType("train"))
+    monkeypatch.setitem(system_mod.modules, "data", types.ModuleType("data"))
+    monkeypatch.setitem(system_mod.modules, "uncertainty", types.ModuleType("uncertainty"))
+
+    system_mod.modules["train"].MultimodalFusionModule = LoaderWrapper
+    system_mod.modules["data"].create_dataloaders = dataloader_factory
+    system_mod.modules["uncertainty"].CalibrationMetrics = CalibrationWrapper
+
+    argv = [
+        "eval.py",
+        "--checkpoint",
+        str(checkpoint),
+        "--output_dir",
+        str(output_dir),
+    ]
+    monkeypatch.setattr(system_mod, "argv", argv)
+
+    existing_eval = system_mod.modules.pop("eval", None)
+    try:
+        runpy.run_module("eval", run_name="__main__")
+    finally:
+        if existing_eval is not None:
+            system_mod.modules["eval"] = existing_eval
+
+    captured = capsys.readouterr().out
+    assert "Standard Evaluation" in captured
+    assert (output_dir / "evaluation_results.json").exists()
