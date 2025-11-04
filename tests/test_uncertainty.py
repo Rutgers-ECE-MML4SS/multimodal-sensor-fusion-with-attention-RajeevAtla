@@ -112,6 +112,40 @@ def test_temperature_scaling_and_calibration():
     assert model.temperature.item() > 0
 
 
+def test_temperature_scaling_device_mismatch(monkeypatch):
+    model = uncertainty.TemperatureScaling()
+    base_logits = torch.randn(4, 3)
+
+    class FakeCudaTensor(torch.Tensor):
+        @staticmethod
+        def __new__(cls, tensor):
+            return torch.Tensor._make_subclass(cls, tensor, tensor.requires_grad)
+
+        @property
+        def device(self):
+            return torch.device("cuda")
+
+    fake_logits = FakeCudaTensor(base_logits)
+    labels = torch.randint(0, 3, (4,))
+
+    calls: dict[str, bool] = {}
+    original_to = torch.Tensor.to
+
+    def fake_to(self, *args, **kwargs):
+        device = args[0] if args else kwargs.get("device")
+        if isinstance(device, torch.device) and device.type == "cuda":
+            calls["cuda"] = True
+            return original_to(self, torch.device("cpu"))
+        return original_to(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "to", fake_to)
+    model.temperature = torch.nn.Parameter(torch.ones(1))
+    model.calibrate(fake_logits, labels, lr=0.05, max_iter=2)
+
+    assert calls.get("cuda") is True
+    assert model.temperature.device.type == "cpu"
+
+
 def test_ensemble_uncertainty_and_empty_guard():
     ensemble_empty = uncertainty.EnsembleUncertainty([])
     with pytest.raises(ValueError):
