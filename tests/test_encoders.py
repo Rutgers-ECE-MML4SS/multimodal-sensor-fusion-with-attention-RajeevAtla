@@ -8,6 +8,7 @@ import pytest
 import torch
 import torch.nn as nn
 import sys
+import runpy
 from pathlib import Path
 from typing import Any, cast
 
@@ -78,6 +79,32 @@ class TestSequenceEncoder:
             print("✓ CNN SequenceEncoder shape test passed")
         except NotImplementedError:
             pytest.skip("CNN SequenceEncoder not implemented yet")
+
+    def test_sequence_encoder_requires_three_dim_input(self, encoder_params):
+        """SequenceEncoder should validate input dimensionality."""
+        encoder = SequenceEncoder(**encoder_params, encoder_type="lstm")
+        invalid_input = torch.randn(encoder_params["input_dim"])
+        with pytest.raises(ValueError, match="Expected 3D input sequence"):
+            encoder(invalid_input)
+
+    def test_sequence_encoder_unknown_type_raises(self, encoder_params):
+        """Invalid encoder type should raise during initialization."""
+        with pytest.raises(ValueError, match="Unknown encoder type"):
+            SequenceEncoder(**encoder_params, encoder_type="invalid")
+
+    def test_sequence_encoder_missing_rnn_raises(self, encoder_params):
+        """Missing RNN module should produce a runtime error."""
+        encoder = SequenceEncoder(**encoder_params, encoder_type="gru")
+        cast(Any, encoder).rnn = None
+        with pytest.raises(RuntimeError, match="RNN module not initialized"):
+            encoder(torch.randn(2, 4, encoder_params["input_dim"]))
+
+    def test_sequence_encoder_unsupported_forward_type(self, encoder_params):
+        """Forward path should guard against unexpected encoder_type values."""
+        encoder = SequenceEncoder(**encoder_params, encoder_type="lstm")
+        cast(Any, encoder).encoder_type = "bogus"
+        with pytest.raises(ValueError, match="Unsupported encoder type"):
+            encoder(torch.randn(2, 4, encoder_params["input_dim"]))
 
     def test_cnn_missing_modules_raises(self, encoder_params, sequence_data):
         """Ensure CNN SequenceEncoder raises when required modules are missing."""
@@ -322,6 +349,53 @@ class TestFrameEncoder:
         except NotImplementedError:
             pytest.skip("FrameEncoder mask handling not implemented yet")
 
+    def test_frame_encoder_unknown_pooling_raises(self, encoder_params):
+        """Invalid pooling strategy should raise at construction time."""
+        with pytest.raises(ValueError, match="Unknown pooling"):
+            FrameEncoder(**encoder_params, temporal_pooling="median")
+
+    def test_frame_encoder_invalid_input_dim_raises(self, encoder_params):
+        """Forward pass validates dimensionality."""
+        encoder = FrameEncoder(**encoder_params, temporal_pooling="average")
+        with pytest.raises(ValueError, match="Expected 3D frame tensor"):
+            encoder(torch.randn(encoder_params["frame_dim"]))
+
+    def test_frame_encoder_average_pooling_with_mask(self, encoder_params):
+        """Average pooling branch should handle masks."""
+        encoder = FrameEncoder(**encoder_params, temporal_pooling="average")
+        frames = torch.randn(2, 5, encoder_params["frame_dim"])
+        mask = torch.tensor([[1, 1, 0, 0, 0], [1, 1, 1, 1, 1]], dtype=torch.float32)
+        output = encoder(frames, mask)
+        assert output.shape == (2, encoder_params["output_dim"])
+
+    def test_frame_encoder_max_pooling_with_mask(self, encoder_params):
+        """Max pooling branch should mask inactive frames."""
+        encoder = FrameEncoder(**encoder_params, temporal_pooling="max")
+        frames = torch.randn(2, 4, encoder_params["frame_dim"])
+        mask = torch.tensor([[1, 0, 0, 0], [1, 1, 1, 0]], dtype=torch.float32)
+        output = encoder(frames, mask)
+        assert output.shape == (2, encoder_params["output_dim"])
+
+    def test_frame_encoder_max_pooling_without_mask(self, encoder_params):
+        """Max pooling without mask uses simple reduction."""
+        encoder = FrameEncoder(**encoder_params, temporal_pooling="max")
+        frames = torch.randn(2, 4, encoder_params["frame_dim"])
+        output = encoder(frames)
+        assert output.shape == (2, encoder_params["output_dim"])
+
+    def test_frame_encoder_runtime_unknown_pooling(self, encoder_params):
+        """Changing pooling strategy at runtime should be validated."""
+        encoder = FrameEncoder(**encoder_params, temporal_pooling="average")
+        cast(Any, encoder).temporal_pooling = "bogus"
+        with pytest.raises(ValueError, match="Unknown pooling strategy"):
+            encoder(torch.randn(2, 3, encoder_params["frame_dim"]))
+
+    def test_attention_pool_requires_layer(self, encoder_params):
+        """Calling attention pool without attention layer should raise."""
+        encoder = FrameEncoder(**encoder_params, temporal_pooling="average")
+        with pytest.raises(RuntimeError, match="Attention layer not initialized"):
+            encoder.attention_pool(torch.randn(2, 3, encoder_params["hidden_dim"]))
+
 
 class TestSimpleMLPEncoder:
     """Test SimpleMLPEncoder module."""
@@ -364,6 +438,12 @@ class TestSimpleMLPEncoder:
         except NotImplementedError:
             pytest.skip("SimpleMLPEncoder not implemented yet")
 
+    def test_simple_mlp_invalid_input_dim_raises(self, encoder_params):
+        """SimpleMLPEncoder should validate feature dimensionality."""
+        encoder = SimpleMLPEncoder(**encoder_params)
+        with pytest.raises(ValueError, match="Expected 2D feature tensor"):
+            encoder(torch.randn(2, 3, encoder_params["input_dim"]))
+
 
 class TestEncoderFactory:
     """Test build_encoder factory function."""
@@ -378,6 +458,11 @@ class TestEncoderFactory:
         except NotImplementedError:
             pytest.skip("Video encoder not implemented yet")
 
+    def test_unknown_modality_uses_mlp(self):
+        """Fallback should use SimpleMLPEncoder for unknown modalities."""
+        encoder = build_encoder(modality="metadata", input_dim=32, output_dim=16)
+        assert isinstance(encoder, SimpleMLPEncoder)
+
     def test_imu_encoder(self):
         """Test factory creates correct encoder for IMU."""
         try:
@@ -387,6 +472,63 @@ class TestEncoderFactory:
             print("✓ IMU encoder factory test passed")
         except NotImplementedError:
             pytest.skip("IMU encoder not implemented yet")
+
+
+def test_encoders_module_entrypoint(capsys):
+    """Execute encoders.__main__ block for coverage."""
+    runpy.run_module("encoders", run_name="__main__")
+    output = capsys.readouterr().out
+    assert "Testing encoders" in output
+
+
+def test_encoders_main_handles_errors(monkeypatch, capsys):
+    """Ensure __main__ error branches emit diagnostics."""
+    import encoders as enc_module
+
+    def execute_main() -> str:
+        lines = Path("src/encoders.py").read_text().splitlines()
+        start = next(idx for idx, line in enumerate(lines) if line.startswith("if __name__"))
+        block = "\n" * start + "\n".join(lines[start:])
+        namespace = dict(enc_module.__dict__)
+        namespace["__name__"] = "__main__"
+        capsys.readouterr()
+        exec(compile(block, "src/encoders.py", "exec"), namespace)
+        return capsys.readouterr().out.lower()
+
+    seq_init = enc_module.SequenceEncoder.__init__
+    seq_forward = enc_module.SequenceEncoder.forward
+    frame_init = enc_module.FrameEncoder.__init__
+    frame_forward = enc_module.FrameEncoder.forward
+    mlp_init = enc_module.SimpleMLPEncoder.__init__
+    mlp_forward = enc_module.SimpleMLPEncoder.forward
+
+    def raise_notimpl(*_args, **_kwargs):
+        raise NotImplementedError("stub")
+
+    monkeypatch.setattr(enc_module.SequenceEncoder, "__init__", raise_notimpl, raising=False)
+    monkeypatch.setattr(enc_module.FrameEncoder, "__init__", raise_notimpl, raising=False)
+    monkeypatch.setattr(enc_module.SimpleMLPEncoder, "__init__", raise_notimpl, raising=False)
+    output = execute_main()
+    assert output.count("not implemented yet") >= 3
+
+    monkeypatch.setattr(enc_module.SequenceEncoder, "__init__", seq_init, raising=False)
+    monkeypatch.setattr(enc_module.FrameEncoder, "__init__", frame_init, raising=False)
+    monkeypatch.setattr(enc_module.SimpleMLPEncoder, "__init__", mlp_init, raising=False)
+
+    def raise_runtime(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(enc_module.SequenceEncoder, "forward", raise_runtime, raising=False)
+    monkeypatch.setattr(enc_module.FrameEncoder, "forward", raise_runtime, raising=False)
+    monkeypatch.setattr(enc_module.SimpleMLPEncoder, "forward", raise_runtime, raising=False)
+    output = execute_main()
+    assert "encoder error" in output
+    assert "frameencoder error" in output
+    assert "simplemlpencoder error" in output
+
+    monkeypatch.setattr(enc_module.SequenceEncoder, "forward", seq_forward, raising=False)
+    monkeypatch.setattr(enc_module.FrameEncoder, "forward", frame_forward, raising=False)
+    monkeypatch.setattr(enc_module.SimpleMLPEncoder, "forward", mlp_forward, raising=False)
 
 
 if __name__ == "__main__":
