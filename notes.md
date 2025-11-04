@@ -9,6 +9,7 @@
 - all transient values were removed (see data/readme.pdf - taken from source) - this isn't significant to our problem, and we can focus on classifying current stable activities
 - cleaned data is < 100 MB GitHub limit
 - heart_rate data is then imputed
+- train-val-test split must be 0.7-0.15-0.15
 
 ## formatting/linting/type checking
 - formatting and linting done with ruff
@@ -16,4 +17,5 @@
 
 
 ## running (github actions)
-- gh actions gives a pretty slim image - 16 gb ram, 2 cpu cores 
+- gh actions gives a pretty slim image - 16 gb ram, 2 vcpu cores (ubuntu-latest)
+- can reduce further - 5 gb ram, 1 vcpu (ubuntu-slim); max execution time is 15 minutes however
