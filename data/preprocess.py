@@ -1,13 +1,13 @@
 """
-Split `dataset2.csv` into per-PeopleId CSV files, generate heart-rate violin plots,
-and prepare for further preprocessing.
+Preprocess `dataset2.csv`: remove transient segments, create heart-rate violin plots,
+align multi-sensor streams to heart-rate cadence, and impute missing data.
 
 Usage:
     python data/preprocess.py
 
 Outputs:
-- `data/people_splits/dataset2_people_<PeopleId>.csv`
 - `data/people_activity_heart_violin_grid.png`
+- `data/preprocessed/dataset2_aligned.csv`
 """
 
 from pathlib import Path
@@ -18,17 +18,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def split_by_people_id(
+def load_filtered_dataset(
     source_path: Path,
-    output_dir: Path,
     id_column: str = "PeopleId",
-    filename_template: str = "dataset2_people_{people_id}.csv",
 ) -> pd.DataFrame:
     """
-    Split the dataset by PeopleId and write each subset to disk.
-
-    Returns:
-        Filtered dataframe (transient rows removed) for further processing.
+    Load the dataset, remove transient rows, and validate expected columns.
     """
     df = pd.read_csv(source_path)
 
@@ -39,13 +34,7 @@ def split_by_people_id(
         df = df[df["activityID"] != "transient activities"]
         df = df[df["activityID"].notna()]
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    for people_id, group in df.groupby(id_column, sort=True):
-        output_path = output_dir / filename_template.format(people_id=people_id)
-        group.to_csv(output_path, index=False)
-
-    return df
+    return df.reset_index(drop=True)
 
 
 def create_heart_rate_violin_grid(
@@ -250,13 +239,12 @@ def hierarchical_heart_rate_imputation(
 if __name__ == "__main__":
     base_dir = Path(__file__).resolve().parent
     source_csv = base_dir / "dataset2.csv"
-    output_directory = base_dir / "people_splits"
     figure_path = base_dir / "people_activity_heart_violin_grid.png"
     preprocessed_dir = base_dir / "preprocessed"
     preprocessed_dir.mkdir(parents=True, exist_ok=True)
     aligned_path = preprocessed_dir / "dataset2_aligned.csv"
 
-    filtered_df = split_by_people_id(source_csv, output_directory)
+    filtered_df = load_filtered_dataset(source_csv)
     create_heart_rate_violin_grid(
         filtered_df,
         id_column="PeopleId",
