@@ -1,7 +1,7 @@
 [project]
-name = "a2"
+name = "MMML Assignment 2"
 version = "0.1.0"
-description = "Add your description here"
+description = "attention-based multimodal sensor fusion for heterogeneous sensor streams"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
