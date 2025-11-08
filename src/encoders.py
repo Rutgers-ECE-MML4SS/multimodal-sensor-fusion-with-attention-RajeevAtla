@@ -398,16 +398,32 @@ def build_encoder(
         Encoder module appropriate for the modality
     """
     config: Dict[str, Any] = dict(encoder_config) if encoder_config else {}
+    override_type = config.pop("type", None)
+    modality_key = modality.lower()
 
-    if modality in ["video", "frames"]:
+    if override_type == "frame":
         return FrameEncoder(
             frame_dim=input_dim, output_dim=output_dim, **config
         )
-    elif modality in ["imu", "audio", "mocap", "accelerometer"]:
+    elif override_type == "sequence":
         return SequenceEncoder(
             input_dim=input_dim, output_dim=output_dim, **config
         )
+    elif override_type == "mlp":
+        return SimpleMLPEncoder(
+            input_dim=input_dim, output_dim=output_dim, **config
+        )
     else:
+        if modality_key in ["video", "frames"]:
+            return FrameEncoder(
+                frame_dim=input_dim, output_dim=output_dim, **config
+            )
+        if modality_key in ["imu", "audio", "mocap", "accelerometer"] or modality_key.startswith(
+            "imu_"
+        ):
+            return SequenceEncoder(
+                input_dim=input_dim, output_dim=output_dim, **config
+            )
         # Default to MLP for unknown modalities
         return SimpleMLPEncoder(
             input_dim=input_dim, output_dim=output_dim, **config

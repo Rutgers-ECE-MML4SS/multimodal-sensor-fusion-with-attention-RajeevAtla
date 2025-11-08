@@ -9,6 +9,7 @@ dataset:
   modalities: [imu_hand, imu_chest, imu_ankle, heart_rate]  # For pamap2
                                                               # For mhad: [video, imu]
                                                               # For cooking: [video, audio]
+  num_classes: 25
   train_split: 0.7
   val_split: 0.15
   test_split: 0.15
@@ -25,6 +26,19 @@ model:
   
   # Encoder configurations per modality
   encoders:
+    imu_hand:
+      type: mlp
+      input_dim: 17  # temp + dual accel + gyro + mag + orientation
+    imu_chest:
+      type: mlp
+      input_dim: 17
+    imu_ankle:
+      type: mlp
+      input_dim: 17
+    heart_rate:
+      type: mlp
+      input_dim: 1
+      hidden_dim: 32
     video:
       type: frame  # frame, sequence, or mlp
       input_dim: 512  # ResNet features

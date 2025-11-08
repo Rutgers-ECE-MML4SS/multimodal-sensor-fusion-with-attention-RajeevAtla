@@ -51,8 +51,8 @@ class MultimodalFusionModule(pl.LightningModule):
         modality_output_dims = {}
 
         for modality in config.dataset.modalities:
-            encoder_config = config.model.encoders.get(modality, {})
-            input_dim = encoder_config.get("input_dim", 64)
+            encoder_config = dict(config.model.encoders.get(modality, {}))
+            input_dim = encoder_config.pop("input_dim", 64)
             output_dim = config.model.output_dim
 
             self.encoders[modality] = build_encoder(
