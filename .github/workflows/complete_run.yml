@@ -25,6 +25,12 @@ jobs:
           save-cache: "false"
           cache-python: "false"
           
-      - name: get data
+      - name: Sync dependencies
+        run: uv sync
+        
+      - name: Run training
         run: |
-          curl https://archive.ics.uci.edu/static/public/231/pamap2+physical+activity+monitoring.zip 
+          for fusion in early late hybrid; do
+              python src/train.py model.fusion_type=$fusion
+          done
+          

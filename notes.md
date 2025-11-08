@@ -8,6 +8,9 @@
 - train-val-test split must be 0.7-0.15-0.15
 - `data/preprocess.py` merges every PAMAP2 `.dat`, drops `activity_id=0`, and writes an aligned CSV after verifying each row has the 56-field schema.
 - Heart-rate gaps are handled per subject via forward-fill/back-fill followed by a 25-sample rolling median to keep the signal smooth before training consumes it.
+- Sharding: outputs live under `data/processed/subject_<id>/activity_<id>.csv` to keep files <20 MB for Git.
+- Stratification: each run writes `data/splits/{train,val,test}.txt` where every line is `path/to/shard.csv,<rows>`, covering exactly 70/15/15 of total rows across subjects and activities.
+- Loader: `src/data.py` now auto-detects the manifests, lazily reads shard CSVs, slices modality-specific columns (e.g., `imu_hand → hand_*`, `heart_rate → heart_rate_bpm`), caches a few shards, and falls back to the legacy `.npy` layout when manifests aren’t present.
 
 ## formatting/linting/type checking
 - formatting and linting done with ruff
