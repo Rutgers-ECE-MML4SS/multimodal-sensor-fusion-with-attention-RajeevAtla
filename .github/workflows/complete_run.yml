@@ -15,7 +15,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up uv
+      - name: Set up uv (cold start, no caching)
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"

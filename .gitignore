@@ -45,6 +45,7 @@ data/pamap2/
 data/mhad/
 data/cooking/
 data/*/raw/
+data/raw
 
 # Model checkpoints (keep only best ones)
 runs/*/checkpoints/*.ckpt
