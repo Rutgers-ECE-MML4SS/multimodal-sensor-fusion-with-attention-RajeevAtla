@@ -163,34 +163,52 @@ def _stratified_split(shards: List[dict]) -> dict:
     import random
 
     random.seed(42)
-    total_rows = sum(s["rows"] for s in shards)
-    quotas = {
-        "train": TRAIN_FRACTION * total_rows,
-        "val": VAL_FRACTION * total_rows,
-        "test": TEST_FRACTION * total_rows,
-    }
     splits = {"train": [], "val": [], "test": []}
+    targets = {"train": TRAIN_FRACTION, "val": VAL_FRACTION, "test": TEST_FRACTION}
     shards_by_activity: dict[str, List[dict]] = {}
     for shard in shards:
         shards_by_activity.setdefault(shard["activity"], []).append(shard)
     for activity, group in shards_by_activity.items():
         random.shuffle(group)
+        total_rows = sum(s["rows"] for s in group)
+        quotas = {k: targets[k] * total_rows for k in targets}
         for shard in group:
             split = max(quotas, key=quotas.get)
             splits[split].append(shard)
             quotas[split] -= shard["rows"]
-    # balance if needed
+    def totals() -> dict:
+        return {k: sum(s["rows"] for s in splits[k]) for k in splits}
+    grand_total = sum(s["rows"] for s in shards)
+    desired = {
+        "train": TRAIN_FRACTION * grand_total,
+        "val": VAL_FRACTION * grand_total,
+        "test": TEST_FRACTION * grand_total,
+    }
     for _ in range(1000):
-        max_split = max(quotas, key=quotas.get)
-        min_split = min(quotas, key=quotas.get)
-        if quotas[min_split] >= 0 and quotas[max_split] <= 0:
+        current = totals()
+        over_split = max(
+            splits, key=lambda k: current[k] - desired[k]
+        )
+        under_split = min(
+            splits, key=lambda k: current[k] - desired[k]
+        )
+        over_amount = current[over_split] - desired[over_split]
+        under_amount = desired[under_split] - current[under_split]
+        if over_amount <= 0 and under_amount <= 0:
             break
-        if not splits[max_split]:
+        donor_candidates = splits[over_split]
+        if not donor_candidates:
             break
-        donor = splits[max_split].pop()
-        splits[min_split].append(donor)
-        quotas[max_split] += donor["rows"]
-        quotas[min_split] -= donor["rows"]
+        donor = min(donor_candidates, key=lambda s: abs(s["rows"] - under_amount))
+        splits[over_split].remove(donor)
+        splits[under_split].append(donor)
+    for split in splits:
+        if not splits[split]:
+            # move smallest shard from largest split
+            largest = max(splits, key=lambda k: sum(s["rows"] for s in splits[k]))
+            donor = min(splits[largest], key=lambda s: s["rows"])
+            splits[largest].remove(donor)
+            splits[split].append(donor)
     return splits
 
 
@@ -200,8 +218,10 @@ def _write_split_manifests(splits: dict) -> None:
     for name, shards in splits.items():
         manifest_path = SPLIT_FILENAMES[name]
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        lines = sorted(path.as_posix() for path in (s["path"] for s in shards))
-        manifest_path.write_text("\n".join(lines))
+        entries = sorted(
+            f"{s['path'].as_posix()},{s['rows']}" for s in shards
+        )
+        manifest_path.write_text("\n".join(entries))
 
 
 def merge_raw_files(raw_dir: Path, output_path: Path) -> Path:

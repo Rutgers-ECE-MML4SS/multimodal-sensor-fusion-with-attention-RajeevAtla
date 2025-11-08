@@ -1,0 +1,14 @@
+data/processed/subject_101/activity_17.csv,23573
+data/processed/subject_101/activity_3.csv,21717
+data/processed/subject_101/activity_4.csv,22253
+data/processed/subject_101/activity_7.csv,20265
+data/processed/subject_102/activity_5.csv,9238
+data/processed/subject_102/activity_6.csv,25108
+data/processed/subject_104/activity_4.csv,31932
+data/processed/subject_106/activity_1.csv,23340
+data/processed/subject_107/activity_12.csv,17646
+data/processed/subject_107/activity_13.csv,11618
+data/processed/subject_107/activity_16.csv,21552
+data/processed/subject_107/activity_4.csv,33720
+data/processed/subject_108/activity_2.csv,22923
+data/processed/subject_109/activity_24.csv,6391
