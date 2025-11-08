@@ -4,12 +4,10 @@
 - conda is really slow, probably significantly contributes to the 30 min time limit -> use uv instead
 
 ## data
-- data was downloaded from kaggle - https://www.kaggle.com/datasets/diegosilvadefrana/fisical-activity-dataset/
-- the original csv file is too large to push to GitHub, so we'll do some preprocessing and splitting before pushing it
-- all transient values were removed (see data/readme.pdf - taken from source) - this isn't significant to our problem, and we can focus on classifying current stable activities
-- cleaned data is < 100 MB GitHub limit
-- heart_rate data is then imputed
+
 - train-val-test split must be 0.7-0.15-0.15
+- `data/preprocess.py` merges every PAMAP2 `.dat`, drops `activity_id=0`, and writes an aligned CSV after verifying each row has the 56-field schema.
+- Heart-rate gaps are handled per subject via forward-fill/back-fill followed by a 25-sample rolling median to keep the signal smooth before training consumes it.
 
 ## formatting/linting/type checking
 - formatting and linting done with ruff
