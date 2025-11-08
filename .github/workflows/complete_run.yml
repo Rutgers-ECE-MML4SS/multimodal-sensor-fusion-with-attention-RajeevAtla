@@ -1,0 +1,30 @@
+name: complete run
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          activate-environment: "true"
+          enable-cache: "false"
+          restore-cache: "false"
+          save-cache: "false"
+          cache-python: "false"
+          
+      - name: get data
+        with: |
+          curl https://archive.ics.uci.edu/static/public/231/pamap2+physical+activity+monitoring.zip 
