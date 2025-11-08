@@ -18,7 +18,16 @@ from typing import Iterable, List, Sequence
 import polars as pl
 
 RAW_SUBDIR = Path(__file__).parent / "raw"
-DEFAULT_OUTPUT = Path(__file__).parent / "processed.csv"
+DEFAULT_OUTPUT = Path(__file__).parent / "processed"
+SPLIT_DIR = Path(__file__).parent / "splits"
+TRAIN_FRACTION = 0.7
+VAL_FRACTION = 0.15
+TEST_FRACTION = 0.15
+SPLIT_FILENAMES = {
+    "train": Path("data/splits/train.txt"),
+    "val": Path("data/splits/val.txt"),
+    "test": Path("data/splits/test.txt"),
+}
 IMU_SENSORS: Sequence[str] = ("hand", "chest", "ankle")
 AXES: Sequence[str] = ("x", "y", "z")
 ORIENTATION_COMPONENTS: Sequence[str] = ("w", "x", "y", "z")
@@ -114,16 +123,97 @@ def _validate_csv(path: Path) -> None:
                 )
 
 
-def merge_raw_files(raw_dir: Path, output_csv: Path) -> Path:
+def _write_sharded_csvs(df: pl.DataFrame, output_dir: Path) -> None:
+    """Emit a CSV per (subject_id, activity_id) shard."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for (subject, activity), group in df.group_by(["subject_id", "activity_id"]):
+        subject_dir = output_dir / f"subject_{subject}"
+        subject_dir.mkdir(parents=True, exist_ok=True)
+        shard_path = subject_dir / f"activity_{activity}.csv"
+        group.write_csv(shard_path, line_terminator="\n")
+        _validate_csv(shard_path)
+
+
+def _collect_shard_metadata(output_dir: Path) -> List[dict]:
+    """Gather shard paths and row counts for splitting."""
+
+    shards: List[dict] = []
+    for path in output_dir.rglob("activity_*.csv"):
+        subject = path.parent.name.split("_")[-1]
+        activity = path.stem.split("_")[-1]
+        rows = pl.read_csv(
+            path,
+            columns=["timestamp_s"],
+        ).height
+        shards.append(
+            {
+                "path": path,
+                "subject": subject,
+                "activity": activity,
+                "rows": rows,
+            }
+        )
+    return shards
+
+
+def _stratified_split(shards: List[dict]) -> dict:
+    """Split shard list into train/val/test manifests."""
+
+    import random
+
+    random.seed(42)
+    total_rows = sum(s["rows"] for s in shards)
+    quotas = {
+        "train": TRAIN_FRACTION * total_rows,
+        "val": VAL_FRACTION * total_rows,
+        "test": TEST_FRACTION * total_rows,
+    }
+    splits = {"train": [], "val": [], "test": []}
+    shards_by_activity: dict[str, List[dict]] = {}
+    for shard in shards:
+        shards_by_activity.setdefault(shard["activity"], []).append(shard)
+    for activity, group in shards_by_activity.items():
+        random.shuffle(group)
+        for shard in group:
+            split = max(quotas, key=quotas.get)
+            splits[split].append(shard)
+            quotas[split] -= shard["rows"]
+    # balance if needed
+    for _ in range(1000):
+        max_split = max(quotas, key=quotas.get)
+        min_split = min(quotas, key=quotas.get)
+        if quotas[min_split] >= 0 and quotas[max_split] <= 0:
+            break
+        if not splits[max_split]:
+            break
+        donor = splits[max_split].pop()
+        splits[min_split].append(donor)
+        quotas[max_split] += donor["rows"]
+        quotas[min_split] -= donor["rows"]
+    return splits
+
+
+def _write_split_manifests(splits: dict) -> None:
+    """Write train/val/test manifests listing shard paths."""
+
+    for name, shards in splits.items():
+        manifest_path = SPLIT_FILENAMES[name]
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = sorted(path.as_posix() for path in (s["path"] for s in shards))
+        manifest_path.write_text("\n".join(lines))
+
+
+def merge_raw_files(raw_dir: Path, output_path: Path) -> Path:
     """
-    Merge every .dat file under ``raw_dir`` into ``output_csv``.
+    Merge every .dat file under ``raw_dir`` into ``output_path`` CSV shards.
 
     Parameters
     ----------
     raw_dir:
         Directory containing the raw PAMAP2 ``*.dat`` subject files.
-    output_csv:
-        Destination CSV path.
+    output_path:
+        Destination directory containing CSV shards.
 
     Returns
     -------
@@ -143,10 +233,12 @@ def merge_raw_files(raw_dir: Path, output_csv: Path) -> Path:
     combined = combined.filter(pl.col("activity_id") != 0)
     combined = combined.sort(["subject_id", "timestamp_s"])
     combined = _interpolate_heart_rate(combined, window_size=HR_ROLLING_WINDOW)
-    output_csv.parent.mkdir(parents=True, exist_ok=True)
-    combined.write_csv(output_csv, line_terminator="\n")
-    _validate_csv(output_csv)
-    return output_csv
+    output_path.mkdir(parents=True, exist_ok=True)
+    _write_sharded_csvs(combined, output_path)
+    shard_meta = _collect_shard_metadata(output_path)
+    splits = _stratified_split(shard_meta)
+    _write_split_manifests(splits)
+    return output_path
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
@@ -165,7 +257,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT,
-        help="Output CSV path (default: data/processed.csv).",
+        help="Output directory for CSV shards (default: data/processed).",
     )
     return parser.parse_args(argv)
 

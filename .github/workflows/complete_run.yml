@@ -26,5 +26,5 @@ jobs:
           cache-python: "false"
           
       - name: get data
-        with: |
+        run: |
           curl https://archive.ics.uci.edu/static/public/231/pamap2+physical+activity+monitoring.zip 
