@@ -503,8 +503,12 @@ def build_fusion_model(
     if fusion_type not in fusion_classes:
         raise ValueError(f"Unknown fusion type: {fusion_type}")
 
+    fusion_kwargs = dict(kwargs)
+    if fusion_type != "hybrid":
+        fusion_kwargs.pop("num_heads", None)
+
     return fusion_classes[fusion_type](
-        modality_dims=modality_dims, num_classes=num_classes, **kwargs
+        modality_dims=modality_dims, num_classes=num_classes, **fusion_kwargs
     )
 
 
