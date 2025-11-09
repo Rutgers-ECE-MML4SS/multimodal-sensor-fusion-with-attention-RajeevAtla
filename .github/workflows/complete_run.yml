@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository - around 25s
+      - name: Checkout repository - around 25s
         uses: actions/checkout@v4
 
       - name: Set up uv (cold start, no caching) - around 2s

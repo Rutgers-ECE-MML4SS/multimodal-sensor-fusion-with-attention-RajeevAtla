@@ -13,12 +13,12 @@
 - Tensor shards: preprocessing now also emits `data/processed_tensors/subject_<id>/activity_<id>.pt` so the loader can keep each shard in memory and avoid repeated CSV parsing.
 - Loader: `src/data.py` now auto-detects the manifests, loads tensor shards (prefetching by default), slices modality-specific columns (e.g., `imu_hand → hand_*`, `heart_rate → heart_rate_bpm`), and falls back to the legacy `.npy` layout when manifests aren’t present.
 - Chunking: dataset loader now uses `dataset.chunk_size` (default 1 024 timesteps) so each manifest shard is split into manageable sequence windows, keeping step counts low while still covering all samples.
+- Training: gradient clipping is enforced via `training.gradient_clip_norm` (default 1.0) so Lightning clamps gradients during every optimizer step.
 - Sequence batches: Each manifest chunk is treated as a single `[batch=1, seq_len, feature_dim]` sample so all IMU/HR streams flow through the `SequenceEncoder` path; labels stay constant per shard (activity ID).
 
 ## formatting/linting/type checking
 - formatting and linting done with ruff
 - type checking done with ty
-
 
 ## running (github actions)
 - gh actions gives a pretty slim image - 16 gb ram, 2 vcpu cores (ubuntu-latest)
