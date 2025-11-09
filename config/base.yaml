@@ -14,7 +14,7 @@ dataset:
   val_split: 0.15
   test_split: 0.15
   batch_size: 32  # Adjust for your RAM (16-64 typical for CPU)
-  num_workers: 0  # Parallel data loading (0-4 for CPU)
+  num_workers: 4  # Parallel data loading (0-4 for CPU)
   chunk_size: 1024  # Number of timesteps per manifest chunk
 
 # Model configuration
