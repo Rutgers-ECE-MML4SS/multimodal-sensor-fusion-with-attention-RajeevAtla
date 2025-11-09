@@ -127,49 +127,19 @@ def _validate_csv(path: Path) -> None:
                 )
 
 
-def _save_tensor_shard(group: pl.DataFrame, tensor_path: Path, stats: dict) -> None:
+def _save_tensor_shard(group: pl.DataFrame, tensor_path: Path) -> None:
     """Persist shard as a torch tensor with column metadata."""
 
     tensor_path.parent.mkdir(parents=True, exist_ok=True)
     numeric_df = group.select(DATA_COLUMNS)
-    columns = numeric_df.columns
-    values = numeric_df.to_numpy().astype("float32", copy=True)
-    for idx, column in enumerate(columns):
-        if column in {"timestamp_s", "activity_id"}:
-            continue
-        column_stats = stats.get(column)
-        if not column_stats:
-            continue
-        mean = column_stats["mean"]
-        std = column_stats["std"] or 1.0
-        values[:, idx] = (values[:, idx] - mean) / std
-    # ensure label and timestamp remain original (integers / seconds)
-    if "activity_id" in columns:
-        values[:, columns.index("activity_id")] = group["activity_id"].to_numpy()
-    if "timestamp_s" in columns:
-        values[:, columns.index("timestamp_s")] = group["timestamp_s"].to_numpy()
     payload = {
-        "columns": columns,
-        "data": torch.tensor(values, dtype=torch.float32),
+        "columns": numeric_df.columns,
+        "data": torch.tensor(numeric_df.to_numpy(), dtype=torch.float32),
     }
     torch.save(payload, tensor_path)
 
 
-def _compute_normalization_stats(df: pl.DataFrame) -> dict:
-    """Compute mean and std for each numeric column (excluding identifiers)."""
-
-    stats = {}
-    for column in DATA_COLUMNS:
-        if column in {"timestamp_s", "activity_id"}:
-            continue
-        series = df[column]
-        mean = float(series.mean())
-        std = float(series.std(ddof=0) or 1.0)
-        stats[column] = {"mean": mean, "std": std}
-    return stats
-
-
-def _materialize_shards(df: pl.DataFrame, csv_dir: Path, tensor_dir: Path, stats: dict) -> List[dict]:
+def _materialize_shards(df: pl.DataFrame, csv_dir: Path, tensor_dir: Path) -> List[dict]:
     """Write CSV and tensor shards; return metadata."""
 
     csv_dir.mkdir(parents=True, exist_ok=True)
@@ -184,7 +154,7 @@ def _materialize_shards(df: pl.DataFrame, csv_dir: Path, tensor_dir: Path, stats
         _validate_csv(csv_path)
 
         tensor_path = tensor_dir / f"subject_{subject}/activity_{activity}.pt"
-        _save_tensor_shard(group, tensor_path, stats)
+        _save_tensor_shard(group, tensor_path)
 
         metadata.append(
             {
@@ -296,8 +266,7 @@ def merge_raw_files(raw_dir: Path, output_path: Path) -> Path:
     combined = combined.filter(pl.col("activity_id") != 0)
     combined = combined.sort(["subject_id", "timestamp_s"])
     combined = _interpolate_heart_rate(combined, window_size=HR_ROLLING_WINDOW)
-    stats = _compute_normalization_stats(combined)
-    metadata = _materialize_shards(combined, output_path, TENSOR_OUTPUT, stats)
+    metadata = _materialize_shards(combined, output_path, TENSOR_OUTPUT)
     splits = _stratified_split(metadata)
     _write_split_manifests(splits)
     return output_path
