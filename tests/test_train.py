@@ -185,7 +185,7 @@ def test_training_step_logs_metrics(tmp_path):
     def fake_log(name, value, **kwargs):
         captured.setdefault(name, []).append((value, kwargs))
 
-    module.log = fake_log  # type: ignore[assignment]
+    module._log_metric = fake_log  # type: ignore[assignment]
 
     batch = _fake_batch()
     loss = module.training_step(batch, 0)

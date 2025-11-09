@@ -124,6 +124,15 @@ class MultimodalFusionModule(pl.LightningModule):
 
         return logits
 
+    def _log_metric(self, name: str, value: torch.Tensor, **kwargs: Any) -> None:
+        """Call `self.log` only when the trainer reference is registered."""
+
+        has_trainer = getattr(self, "_trainer", None) is not None
+        has_fabric = getattr(self, "_fabric", None) is not None
+        if not (has_trainer or has_fabric):
+            return
+        self.log(name, value, **kwargs)
+
     def training_step(self, batch, batch_idx):
         """Training step for one batch."""
         features, labels, mask = batch
@@ -139,8 +148,12 @@ class MultimodalFusionModule(pl.LightningModule):
         acc = (preds == labels).float().mean()
 
         # Log metrics
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/acc", acc, on_step=True, on_epoch=True, prog_bar=True)
+        self._log_metric(
+            "train/loss", loss, on_step=True, on_epoch=True, prog_bar=True
+        )
+        self._log_metric(
+            "train/acc", acc, on_step=True, on_epoch=True, prog_bar=True
+        )
 
         return loss
 
@@ -163,8 +176,8 @@ class MultimodalFusionModule(pl.LightningModule):
         confidences, _ = torch.max(probs, dim=1)
 
         # Log metrics
-        self.log("val/loss", loss, on_epoch=True, prog_bar=True)
-        self.log("val/acc", acc, on_epoch=True, prog_bar=True)
+        self._log_metric("val/loss", loss, on_epoch=True, prog_bar=True)
+        self._log_metric("val/acc", acc, on_epoch=True, prog_bar=True)
 
         return {
             "val_loss": loss,
@@ -188,7 +201,7 @@ class MultimodalFusionModule(pl.LightningModule):
         probs = F.softmax(logits, dim=1)
         confidences, _ = torch.max(probs, dim=1)
 
-        self.log("test/acc", acc, on_epoch=True)
+        self._log_metric("test/acc", acc, on_epoch=True)
 
         return {"preds": preds, "labels": labels, "confidences": confidences}
 
