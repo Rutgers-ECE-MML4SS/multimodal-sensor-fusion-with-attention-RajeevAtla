@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+import warnings
 
 import numpy as np
 import torch
@@ -451,6 +452,7 @@ def create_dataloaders(
     modality_dropout: float = 0.0,
     pin_memory: Optional[bool] = None,
     prefetch_shards: bool = True,
+    persistent_workers: Optional[bool] = None,
     chunk_size: Optional[int] = None,
     chunk_cache_dir: Optional[str] = None,
     **kwargs,
@@ -467,6 +469,8 @@ def create_dataloaders(
         modality_dropout: Dropout probability for modalities during training
         pin_memory: Override for DataLoader ``pin_memory`` flag. ``None`` defaults
             to ``torch.cuda.is_available()``.
+        persistent_workers: Set ``DataLoader.persistent_workers`` explicitly.
+            ``None`` defaults to enabling persistence when ``num_workers > 0``.
         **kwargs: Additional dataset-specific arguments
 
     Returns:
@@ -529,9 +533,19 @@ def create_dataloaders(
     pin_memory_flag = (
         torch.cuda.is_available() if pin_memory is None else pin_memory
     )
+    if persistent_workers is None:
+        persistent_workers_flag = num_workers > 0
+    else:
+        persistent_workers_flag = bool(persistent_workers)
+    if persistent_workers_flag and num_workers == 0:
+        warnings.warn(
+            "persistent_workers=True requires num_workers > 0; disabling.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        persistent_workers_flag = False
 
     def _build_loader(dataset, shuffle: bool) -> data.DataLoader:
-        persistent_workers = num_workers > 0
         if getattr(dataset, "use_manifest", False):
             loader_batch_size = 1
             collate_fn = collate_identity
@@ -545,7 +559,7 @@ def create_dataloaders(
             num_workers=num_workers,
             collate_fn=collate_fn,
             pin_memory=pin_memory_flag,
-            persistent_workers=persistent_workers,
+            persistent_workers=persistent_workers_flag,
         )
 
     train_loader = _build_loader(train_dataset, shuffle=True)
