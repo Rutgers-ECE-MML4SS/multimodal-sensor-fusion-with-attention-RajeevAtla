@@ -526,6 +526,32 @@ class TestEncoderFactory:
             pytest.skip("IMU encoder not implemented yet")
 
 
+def test_build_encoder_override_routes():
+    frame_encoder = build_encoder(
+        modality="video_feed",
+        input_dim=16,
+        output_dim=8,
+        encoder_config={"type": "frame", "temporal_pooling": "average"},
+    )
+    assert isinstance(frame_encoder, FrameEncoder)
+
+    sequence_encoder = build_encoder(
+        modality="audio_stream",
+        input_dim=32,
+        output_dim=12,
+        encoder_config={"type": "sequence", "encoder_type": "gru"},
+    )
+    assert isinstance(sequence_encoder, SequenceEncoder)
+
+    mlp_encoder = build_encoder(
+        modality="metadata",
+        input_dim=10,
+        output_dim=5,
+        encoder_config={"type": "mlp", "hidden_dim": 20, "num_layers": 1},
+    )
+    assert isinstance(mlp_encoder, SimpleMLPEncoder)
+
+
 def test_encoders_module_entrypoint(capsys):
     """Execute encoders.__main__ block for coverage."""
     runpy.run_module("encoders", run_name="__main__")

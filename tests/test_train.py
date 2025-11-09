@@ -1,6 +1,8 @@
 import json
 import sys
+import types
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import torch
@@ -214,6 +216,77 @@ def test_cosine_scheduler_parameters(tmp_path):
     assert isinstance(step_scheduler, torch.optim.lr_scheduler.StepLR)
     assert step_scheduler.step_size == 30
     assert step_scheduler.gamma == 0.1
+
+
+def test_layer_norm_logging_and_gradient_clipping(tmp_path, monkeypatch):
+    config = _base_config(tmp_path)
+    config.model.layer_norm = True
+
+    class PassthroughEncoder(nn.Module):
+        def forward(self, inputs):
+            return inputs
+
+    feature_store: dict[str, torch.Tensor] = {}
+
+    class RecordingFusion(nn.Module):
+        def forward(self, feats, mask=None):
+            feature_store["sensor"] = feats["sensor"].detach().clone()
+            batch = next(iter(feats.values())).shape[0]
+            num_classes = config.dataset.get("num_classes", 11)
+            return torch.zeros(batch, num_classes)
+
+    monkeypatch.setattr(
+        train,
+        "build_encoder",
+        lambda **kwargs: PassthroughEncoder(),
+    )
+    monkeypatch.setattr(
+        train,
+        "build_fusion_model",
+        lambda **kwargs: RecordingFusion(),
+    )
+
+    module = train.MultimodalFusionModule(config)
+    features = {
+        "sensor": torch.tensor(
+            [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]], dtype=torch.float32
+        )
+    }
+    mask = torch.ones(features["sensor"].shape[0], 1)
+    logits = module.forward(features, mask)
+    assert logits.shape == (features["sensor"].shape[0], 11)
+    normalized = feature_store["sensor"]
+    assert torch.allclose(
+        normalized.mean(dim=1), torch.zeros(normalized.size(0)), atol=1e-5
+    )
+
+    logged: dict[str, tuple[torch.Tensor, dict[str, object]]] = {}
+
+    def fake_log(self, name, value, **kwargs):
+        logged[name] = (value, kwargs)
+
+    module_any = cast(Any, module)
+    module_any._trainer = object()
+    module_any.log = types.MethodType(fake_log, module)
+    metric_value = torch.tensor(1.23)
+    module._log_metric("custom/metric", metric_value, prog_bar=True)
+    assert "custom/metric" in logged
+    assert logged["custom/metric"][0] is metric_value
+
+    clip_args: dict[str, tuple[object, float, str]] = {}
+
+    def fake_clip(self, optimizer, gradient_clip_val, gradient_clip_algorithm):
+        clip_args["args"] = (optimizer, gradient_clip_val, gradient_clip_algorithm)
+
+    module_any.clip_gradients = types.MethodType(fake_clip, module)
+    optimizer = torch.optim.SGD(module.parameters(), lr=0.1)
+    module.configure_gradient_clipping(
+        optimizer,
+        gradient_clip_val=0.5,
+        gradient_clip_algorithm="value",
+    )
+    assert clip_args["args"][1] == pytest.approx(0.5)
+    assert clip_args["args"][2] == "value"
 
 
 def test_train_entrypoint_executes_main(monkeypatch):
