@@ -269,13 +269,19 @@ class MultimodalDataset(data.Dataset):
             features = {}
             for modality, index_tensor in self._modality_index_tensors.items():
                 seq = batch.index_select(1, index_tensor).clone().float()
-                features[modality] = seq.unsqueeze(0)
+                sanitized = torch.nan_to_num(
+                    seq, nan=0.0, posinf=0.0, neginf=0.0
+                )
+                features[modality] = sanitized.unsqueeze(0)
             label = torch.tensor([int(label_value)]).long()
         else:
             features = {}
             for modality in self.modalities:
                 feat = self.data[modality][idx]
-                features[modality] = torch.from_numpy(feat).float()
+                tensor = torch.from_numpy(feat).float()
+                features[modality] = torch.nan_to_num(
+                    tensor, nan=0.0, posinf=0.0, neginf=0.0
+                )
             labels = self._require_labels()
             label = torch.tensor(labels[idx]).long()
 
@@ -416,6 +422,7 @@ def create_dataloaders(
     batch_size: int = 32,
     num_workers: int = 4,
     modality_dropout: float = 0.0,
+    pin_memory: Optional[bool] = None,
     **kwargs,
 ) -> Tuple[data.DataLoader, data.DataLoader, data.DataLoader]:
     """
@@ -428,6 +435,8 @@ def create_dataloaders(
         batch_size: Batch size
         num_workers: Number of data loading workers
         modality_dropout: Dropout probability for modalities during training
+        pin_memory: Override for DataLoader ``pin_memory`` flag. ``None`` defaults
+            to ``torch.cuda.is_available()``.
         **kwargs: Additional dataset-specific arguments
 
     Returns:
@@ -486,6 +495,10 @@ def create_dataloaders(
             chunk_size=chunk_size,
         )
 
+    pin_memory_flag = (
+        torch.cuda.is_available() if pin_memory is None else pin_memory
+    )
+
     def _build_loader(dataset, shuffle: bool) -> data.DataLoader:
         persistent_workers = num_workers > 0
         if getattr(dataset, "use_manifest", False):
@@ -500,7 +513,7 @@ def create_dataloaders(
             shuffle=shuffle,
             num_workers=num_workers,
             collate_fn=collate_fn,
-            pin_memory=False,
+            pin_memory=pin_memory_flag,
             persistent_workers=persistent_workers,
         )
 

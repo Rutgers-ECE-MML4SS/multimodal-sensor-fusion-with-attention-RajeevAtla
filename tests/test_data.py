@@ -115,6 +115,7 @@ def test_create_dataloaders_synthetic_and_real(tmp_path, monkeypatch):
         num_workers=0,
         num_samples=10,
         modality_dim=3,
+        pin_memory=False,
     )
 
     for loader in synthetic_loaders:
@@ -132,6 +133,7 @@ def test_create_dataloaders_synthetic_and_real(tmp_path, monkeypatch):
         modalities=modalities,
         batch_size=3,
         num_workers=0,
+        pin_memory=False,
     )
 
     train_features, train_labels, train_masks = next(iter(real_loaders[0]))
