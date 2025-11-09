@@ -24,6 +24,7 @@ model:
   output_dim: 128  # Encoder output dimension
   num_heads: 4  # For attention mechanisms
   dropout: 0.1
+  layer_norm: true
   
   # Encoder configurations per modality
   encoders:

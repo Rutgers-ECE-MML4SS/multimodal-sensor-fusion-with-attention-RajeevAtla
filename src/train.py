@@ -49,6 +49,8 @@ class MultimodalFusionModule(pl.LightningModule):
         # Build encoders for each modality
         self.encoders = nn.ModuleDict()
         modality_output_dims = {}
+        self.use_layer_norm = bool(config.model.get("layer_norm", False))
+        self.layer_norms = nn.ModuleDict()
 
         for modality in config.dataset.modalities:
             encoder_config = dict(config.model.encoders.get(modality, {}))
@@ -62,6 +64,8 @@ class MultimodalFusionModule(pl.LightningModule):
                 encoder_config=encoder_config,
             )
             modality_output_dims[modality] = output_dim
+            if self.use_layer_norm:
+                self.layer_norms[modality] = nn.LayerNorm(output_dim)
 
         # Build fusion model
         # TODO: Students need to ensure their fusion implementation works here
@@ -97,7 +101,10 @@ class MultimodalFusionModule(pl.LightningModule):
         encoded_features = {}
         for modality, encoder in self.encoders.items():
             if modality in features:
-                encoded_features[modality] = encoder(features[modality])
+                encoded = encoder(features[modality])
+                if self.use_layer_norm and modality in self.layer_norms:
+                    encoded = self.layer_norms[modality](encoded)
+                encoded_features[modality] = encoded
 
         # Fusion
         # TODO: Students ensure their fusion model returns correct format
