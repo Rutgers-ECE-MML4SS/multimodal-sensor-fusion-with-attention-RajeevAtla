@@ -50,6 +50,26 @@ def _configure_torch_threads(max_threads: Optional[int] = None) -> None:
             pass
 
 
+def _configure_matmul_precision(precision: Optional[str]) -> None:
+    """Set torch.matmul precision if requested and supported."""
+
+    if not precision:
+        return
+
+    setter = getattr(torch, "set_float32_matmul_precision", None)
+    if setter is None:  # pragma: no cover - older torch without API
+        return
+
+    try:
+        setter(precision)
+    except (RuntimeError, ValueError) as exc:  # pragma: no cover - invalid value
+        warnings.warn(
+            f"Unable to set matmul precision to '{precision}': {exc}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
 def _clone_module(module: nn.Module) -> nn.Module:
     """Return a detached copy of a module, preserving type and buffers."""
 
@@ -411,6 +431,7 @@ def main(config: DictConfig):
 
     cpu_budget = min(4, os.cpu_count() or 4)
     _configure_torch_threads(cpu_budget)
+    _configure_matmul_precision(config.training.get("matmul_precision"))
 
     # Set random seed for reproducibility
     pl.seed_everything(config.seed)

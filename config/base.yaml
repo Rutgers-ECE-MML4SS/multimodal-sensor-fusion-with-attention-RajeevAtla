@@ -76,6 +76,7 @@ training:
   compile_backend: inductor
   compile_mode: reduce-overhead
   compile_cache_size: 8
+  matmul_precision: medium
   early_stopping_patience: 10
   label_smoothing: 0.05
   

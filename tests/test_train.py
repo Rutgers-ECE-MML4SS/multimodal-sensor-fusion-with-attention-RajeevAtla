@@ -42,6 +42,7 @@ def _base_config(tmp_path, optimizer="adamw", scheduler="cosine"):
                 "early_stopping_patience": 1,
                 "gradient_clip_norm": 0.0,
                 "enable_compile": False,
+                "matmul_precision": "high",
                 "augmentation": {"modality_dropout": 0.0},
             },
             "experiment": {
@@ -387,6 +388,20 @@ def test_maybe_compile_handles_missing_torch_compile(tmp_path, monkeypatch):
 
     module = train.MultimodalFusionModule(config)
     assert isinstance(module.encoders["sensor"], nn.Module)
+
+
+def test_configure_matmul_precision_calls_torch(monkeypatch):
+    called: dict[str, str] = {}
+
+    def fake_set(value: str) -> None:
+        called["precision"] = value
+
+    monkeypatch.setattr(
+        train.torch, "set_float32_matmul_precision", fake_set
+    )
+
+    train._configure_matmul_precision("medium")
+    assert called["precision"] == "medium"
 
 
 def test_train_entrypoint_executes_main(monkeypatch):
