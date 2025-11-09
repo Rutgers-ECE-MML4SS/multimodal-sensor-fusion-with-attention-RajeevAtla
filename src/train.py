@@ -173,6 +173,9 @@ class MultimodalFusionModule(pl.LightningModule):
     def _maybe_compile_modules(self) -> None:
         """Compile encoders and fusion modules when torch.compile is available."""
 
+        if not bool(self.config.training.get("enable_compile", True)):
+            return
+
         compile_fn = getattr(torch, "compile", None)
         if compile_fn is None:
             return
@@ -182,7 +185,7 @@ class MultimodalFusionModule(pl.LightningModule):
         cache_limit = int(self.config.training.get("compile_cache_size", 0))
 
         for name, encoder in list(self.encoders.items()):
-            cache_key = f"encoder::{encoder.__class__.__name__}"
+            cache_key = f"encoder::{name}::{encoder.__class__.__name__}"
             try:
                 self.encoders[name] = _compile_with_cache(
                     encoder, cache_key, backend, mode, cache_limit

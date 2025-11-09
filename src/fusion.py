@@ -24,7 +24,7 @@ class EarlyFusion(nn.Module):
 
     modality_names: list[str]
     modality_dims: Dict[str, int]
-    fusion: nn.Sequential
+    fusion: nn.Module
     num_classes: int
     hidden_dim: int
 
@@ -53,15 +53,18 @@ class EarlyFusion(nn.Module):
         cast_self.hidden_dim = hidden_dim
         concat_dim = sum(dims.values())
 
-        self.fusion = nn.Sequential(
-            nn.Linear(concat_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, num_classes),
-        )
+        if concat_dim == 0:
+            self.fusion = nn.Identity()
+        else:
+            self.fusion = nn.Sequential(
+                nn.Linear(concat_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, num_classes),
+            )
 
     def forward(
         self,

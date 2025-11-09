@@ -15,10 +15,23 @@ import json
 import argparse
 from tqdm import tqdm
 import itertools
+from typing import Any
+
+from omegaconf import DictConfig
 
 from train import MultimodalFusionModule
 from data import create_dataloaders
 from uncertainty import CalibrationMetrics
+
+
+def _cfg_get(cfg: Any, key: str, default: Any = None) -> Any:
+    """Retrieve config values from DictConfig, dict, or objects."""
+
+    if isinstance(cfg, DictConfig):
+        return cfg.get(key, default)
+    if isinstance(cfg, dict):
+        return cfg.get(key, default)
+    return getattr(cfg, key, default)
 
 
 def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
@@ -305,10 +318,10 @@ def main():
         modalities=config.dataset.modalities,
         batch_size=config.dataset.batch_size,
         num_workers=config.dataset.num_workers,
-        chunk_size=config.dataset.get("chunk_size"),
-        prefetch_shards=config.dataset.get("prefetch_shards", True),
-        pin_memory=config.dataset.get("pin_memory"),
-        chunk_cache_dir=config.dataset.get("chunk_cache_dir"),
+        chunk_size=_cfg_get(config.dataset, "chunk_size"),
+        prefetch_shards=_cfg_get(config.dataset, "prefetch_shards", True),
+        pin_memory=_cfg_get(config.dataset, "pin_memory"),
+        chunk_cache_dir=_cfg_get(config.dataset, "chunk_cache_dir"),
     )
 
     # Standard evaluation

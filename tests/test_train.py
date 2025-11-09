@@ -1,3 +1,4 @@
+import copy
 import json
 import sys
 import types
@@ -40,6 +41,7 @@ def _base_config(tmp_path, optimizer="adamw", scheduler="cosine"):
                 "max_epochs": 1,
                 "early_stopping_patience": 1,
                 "gradient_clip_norm": 0.0,
+                "enable_compile": False,
                 "augmentation": {"modality_dropout": 0.0},
             },
             "experiment": {
@@ -218,6 +220,53 @@ def test_cosine_scheduler_parameters(tmp_path):
     assert step_scheduler.gamma == 0.1
 
 
+def test_compile_helpers_cache_and_reload(monkeypatch):
+    train._COMPILED_MODULE_CACHE.clear()
+    base_module = nn.Linear(4, 2)
+
+    clone = train._clone_module(base_module)
+    assert clone is not base_module
+
+    train._remember_compiled_module("skip", base_module, limit=0)
+    assert "skip" not in train._COMPILED_MODULE_CACHE
+
+    train._remember_compiled_module("first", base_module, limit=1)
+    assert "first" in train._COMPILED_MODULE_CACHE
+    train._remember_compiled_module("second", base_module, limit=1)
+    assert "first" not in train._COMPILED_MODULE_CACHE
+
+    cached = train._load_compiled_from_cache("second")
+    assert cached is not None
+
+    monkeypatch.setattr(train.torch, "compile", None)
+    assert (
+        train._compile_with_cache(base_module, "linear", "inductor", "default", 1)
+        is base_module
+    )
+
+    compiled_calls: list[tuple[str | None, str | None]] = []
+
+    def fake_compile(module, backend=None, mode=None):
+        compiled_calls.append((backend, mode))
+        return copy.deepcopy(module)
+
+    monkeypatch.setattr(train.torch, "compile", fake_compile)
+    train._COMPILED_MODULE_CACHE.clear()
+
+    compiled_once = train._compile_with_cache(
+        base_module, "linear", "fake_backend", "fake_mode", 2
+    )
+    assert compiled_calls == [("fake_backend", "fake_mode")]
+
+    base_module.weight.data.fill_(3.14)
+    cached_reload = train._compile_with_cache(
+        base_module, "linear", "fake_backend", "fake_mode", 2
+    )
+    assert cached_reload is not compiled_once
+    assert isinstance(cached_reload, nn.Linear)
+    assert torch.allclose(cached_reload.weight, base_module.weight)
+
+
 def test_layer_norm_logging_and_gradient_clipping(tmp_path, monkeypatch):
     config = _base_config(tmp_path)
     config.model.layer_norm = True
@@ -287,6 +336,57 @@ def test_layer_norm_logging_and_gradient_clipping(tmp_path, monkeypatch):
     )
     assert clip_args["args"][1] == pytest.approx(0.5)
     assert clip_args["args"][2] == "value"
+
+
+def test_maybe_compile_modules_and_forward_skip_missing(tmp_path, monkeypatch):
+    config = _base_config(tmp_path)
+    config.dataset.modalities = ["sensor", "aux"]
+    config.dataset.num_classes = 3
+    config.model.encoders["sensor"] = {"input_dim": 64}
+    config.model.encoders["aux"] = {"input_dim": 16}
+    config.training.enable_compile = True
+    config.training.compile_cache_size = 1
+
+    compile_calls: list[tuple[str | None, str | None, str]] = []
+
+    def fake_compile(module, backend=None, mode=None):
+        compile_calls.append((backend, mode, module.__class__.__name__))
+        return copy.deepcopy(module)
+
+    monkeypatch.setattr(train.torch, "compile", fake_compile)
+
+    recorded: dict[str, list[str]] = {}
+
+    class RecorderFusion(nn.Module):
+        def forward(self, feats, mask=None):
+            recorded["keys"] = sorted(feats.keys())
+            batch = next(iter(feats.values())).shape[0]
+            return torch.zeros(batch, config.dataset.num_classes)
+
+    monkeypatch.setattr(
+        train,
+        "build_fusion_model",
+        lambda **_: RecorderFusion(),
+    )
+
+    module = train.MultimodalFusionModule(config)
+    assert compile_calls, "_maybe_compile_modules should invoke torch.compile"
+
+    features = {"sensor": torch.randn(5, 64)}
+    mask = torch.ones(5, 2)
+    logits = module(features, mask)
+    assert logits.shape == (5, config.dataset.num_classes)
+    assert recorded["keys"] == ["sensor"]
+
+
+def test_maybe_compile_handles_missing_torch_compile(tmp_path, monkeypatch):
+    config = _base_config(tmp_path)
+    config.training.enable_compile = True
+
+    monkeypatch.setattr(train.torch, "compile", None)
+
+    module = train.MultimodalFusionModule(config)
+    assert isinstance(module.encoders["sensor"], nn.Module)
 
 
 def test_train_entrypoint_executes_main(monkeypatch):
