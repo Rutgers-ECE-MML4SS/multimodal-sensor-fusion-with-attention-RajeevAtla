@@ -16,9 +16,11 @@ from pathlib import Path
 from typing import Iterable, List, Sequence
 
 import polars as pl
+import torch
 
 RAW_SUBDIR = Path(__file__).parent / "raw"
 DEFAULT_OUTPUT = Path(__file__).parent / "processed"
+TENSOR_OUTPUT = Path(__file__).parent / "processed_tensors"
 SPLIT_DIR = Path(__file__).parent / "splits"
 TRAIN_FRACTION = 0.7
 VAL_FRACTION = 0.15
@@ -123,38 +125,47 @@ def _validate_csv(path: Path) -> None:
                 )
 
 
-def _write_sharded_csvs(df: pl.DataFrame, output_dir: Path) -> None:
-    """Emit a CSV per (subject_id, activity_id) shard."""
+def _save_tensor_shard(group: pl.DataFrame, tensor_path: Path) -> None:
+    """Persist shard as a torch tensor with column metadata."""
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    tensor_path.parent.mkdir(parents=True, exist_ok=True)
+    numeric_df = group.select(DATA_COLUMNS)
+    values = numeric_df.to_numpy()
+    payload = {
+        "columns": numeric_df.columns,
+        "data": torch.tensor(values, dtype=torch.float32),
+    }
+    torch.save(payload, tensor_path)
+
+
+def _materialize_shards(df: pl.DataFrame, csv_dir: Path, tensor_dir: Path) -> List[dict]:
+    """Write CSV and tensor shards; return metadata."""
+
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    tensor_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata: List[dict] = []
     for (subject, activity), group in df.group_by(["subject_id", "activity_id"]):
-        subject_dir = output_dir / f"subject_{subject}"
-        subject_dir.mkdir(parents=True, exist_ok=True)
-        shard_path = subject_dir / f"activity_{activity}.csv"
-        group.write_csv(shard_path, line_terminator="\n")
-        _validate_csv(shard_path)
+        csv_subject_dir = csv_dir / f"subject_{subject}"
+        csv_subject_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = csv_subject_dir / f"activity_{activity}.csv"
+        group.write_csv(csv_path, line_terminator="\n")
+        _validate_csv(csv_path)
 
+        tensor_path = tensor_dir / f"subject_{subject}/activity_{activity}.pt"
+        _save_tensor_shard(group, tensor_path)
 
-def _collect_shard_metadata(output_dir: Path) -> List[dict]:
-    """Gather shard paths and row counts for splitting."""
-
-    shards: List[dict] = []
-    for path in output_dir.rglob("activity_*.csv"):
-        subject = path.parent.name.split("_")[-1]
-        activity = path.stem.split("_")[-1]
-        rows = pl.read_csv(
-            path,
-            columns=["timestamp_s"],
-        ).height
-        shards.append(
+        metadata.append(
             {
-                "path": path,
                 "subject": subject,
                 "activity": activity,
-                "rows": rows,
+                "rows": group.height,
+                "csv_path": csv_path,
+                "tensor_path": tensor_path,
             }
         )
-    return shards
+
+    return metadata
 
 
 def _stratified_split(shards: List[dict]) -> dict:
@@ -167,7 +178,7 @@ def _stratified_split(shards: List[dict]) -> dict:
     targets = {"train": TRAIN_FRACTION, "val": VAL_FRACTION, "test": TEST_FRACTION}
     shards_by_activity: dict[str, List[dict]] = {}
     for shard in shards:
-        shards_by_activity.setdefault(shard["activity"], []).append(shard)
+        shards_by_activity.setdefault(str(shard["activity"]), []).append(shard)
     for activity, group in shards_by_activity.items():
         random.shuffle(group)
         total_rows = sum(s["rows"] for s in group)
@@ -219,7 +230,7 @@ def _write_split_manifests(splits: dict) -> None:
         manifest_path = SPLIT_FILENAMES[name]
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         entries = sorted(
-            f"{s['path'].as_posix()},{s['rows']}" for s in shards
+            f"{s['tensor_path'].as_posix()},{s['rows']}" for s in shards
         )
         manifest_path.write_text("\n".join(entries))
 
@@ -253,10 +264,8 @@ def merge_raw_files(raw_dir: Path, output_path: Path) -> Path:
     combined = combined.filter(pl.col("activity_id") != 0)
     combined = combined.sort(["subject_id", "timestamp_s"])
     combined = _interpolate_heart_rate(combined, window_size=HR_ROLLING_WINDOW)
-    output_path.mkdir(parents=True, exist_ok=True)
-    _write_sharded_csvs(combined, output_path)
-    shard_meta = _collect_shard_metadata(output_path)
-    splits = _stratified_split(shard_meta)
+    metadata = _materialize_shards(combined, output_path, TENSOR_OUTPUT)
+    splits = _stratified_split(metadata)
     _write_split_manifests(splits)
     return output_path
 

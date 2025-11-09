@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.utils.data as data
 
@@ -36,6 +35,7 @@ class MultimodalDataset(data.Dataset):
         transform=None,
         modality_dropout: float = 0.0,
         max_shard_cache: int = 4,
+        prefetch_shards: bool = True,
     ):
         """
         Args:
@@ -44,6 +44,7 @@ class MultimodalDataset(data.Dataset):
             split: One of ['train', 'val', 'test']
             transform: Optional data augmentation transform
             modality_dropout: Probability of dropping each modality (training only)
+            prefetch_shards: Load all manifest shards into memory if True
             max_shard_cache: Number of manifest shards to keep in RAM simultaneously
         """
         self.data_dir = Path(data_dir)
@@ -51,6 +52,7 @@ class MultimodalDataset(data.Dataset):
         self.split = split
         self.transform = transform
         self.modality_dropout = modality_dropout if split == "train" else 0.0
+        self.prefetch_shards = prefetch_shards
         self.max_shard_cache = max(1, max_shard_cache)
 
         self.use_manifest = False
@@ -98,7 +100,7 @@ class MultimodalDataset(data.Dataset):
         return data, labels
 
     def _init_from_manifest(self, manifest_path: Path) -> None:
-        """Initialise dataset backed by sharded CSV manifests."""
+        """Initialise dataset backed by sharded tensor manifests."""
 
         entries = []
         project_root = manifest_path.parents[2] if len(manifest_path.parents) >= 3 else Path(".")
@@ -127,16 +129,36 @@ class MultimodalDataset(data.Dataset):
         if not entries:
             raise ValueError(f"No shards found in manifest {manifest_path}")
 
+        sample_payload = torch.load(entries[0]["path"])
+        columns = list(sample_payload["columns"])
+        self._column_to_index = {name: idx for idx, name in enumerate(columns)}
+        modality_columns = self._resolve_modality_columns(columns)
+        self._modality_column_indices = {
+            modality: [self._column_to_index[col] for col in cols]
+            for modality, cols in modality_columns.items()
+        }
+        self._modality_index_tensors = {
+            modality: torch.tensor(indices, dtype=torch.long)
+            for modality, indices in self._modality_column_indices.items()
+        }
+        if "activity_id" not in self._column_to_index:
+            raise ValueError("activity_id column missing from tensor shards.")
+        self._activity_col_index = self._column_to_index["activity_id"]
+
         self.use_manifest = True
         self._shard_paths: List[Path] = [e["path"] for e in entries]
         self._shard_rows: List[int] = [e["rows"] for e in entries]
         self._cumulative_rows: List[int] = list(accumulate(self._shard_rows))
         self._total_rows: int = self._cumulative_rows[-1]
-        self._shard_cache: OrderedDict[str, pd.DataFrame] = OrderedDict()
+        self._shard_cache: OrderedDict[str, dict] = OrderedDict()
 
-        # Capture column metadata from the first shard
-        sample_columns = pd.read_csv(self._shard_paths[0], nrows=0).columns.tolist()
-        self._modality_columns = self._resolve_modality_columns(sample_columns)
+        if self.prefetch_shards:
+            for entry in entries:
+                payload = torch.load(entry["path"])
+                self._shard_cache[str(entry["path"])] = payload
+            self.max_shard_cache = len(self._shard_paths)
+        else:
+            self.max_shard_cache = max(1, self.max_shard_cache)
 
     def _resolve_modality_columns(self, columns: List[str]) -> Dict[str, List[str]]:
         """Map requested modalities to the appropriate CSV column subsets."""
@@ -174,35 +196,39 @@ class MultimodalDataset(data.Dataset):
         row_offset = idx - prev_total
         return shard_idx, row_offset
 
-    def _get_shard_dataframe(self, shard_idx: int) -> pd.DataFrame:
-        """Load (or fetch cached) shard DataFrame."""
+    def _get_shard_data(self, shard_idx: int) -> dict:
+        """Load (or fetch cached) shard tensor payload."""
 
         path = self._shard_paths[shard_idx]
         key = str(path)
         if key in self._shard_cache:
-            df = self._shard_cache.pop(key)
-            self._shard_cache[key] = df
-            return df
+            payload = self._shard_cache.pop(key)
+            self._shard_cache[key] = payload
+            return payload
 
-        df = pd.read_csv(path)
-        self._shard_cache[key] = df
-        if len(self._shard_cache) > self.max_shard_cache:
+        payload = torch.load(path)
+        self._shard_cache[key] = payload
+        if not self.prefetch_shards and len(self._shard_cache) > self.max_shard_cache:
             self._shard_cache.popitem(last=False)
-        return df
+        return payload
 
     def _get_manifest_sample(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         """Retrieve features/label for the given manifest-backed sample."""
 
         shard_idx, row_offset = self._locate_shard_index(idx)
-        df = self._get_shard_dataframe(shard_idx)
-        row = df.iloc[row_offset]
+        payload = self._get_shard_data(shard_idx)
+        data = payload["data"]
+        row = data[row_offset]
 
         features: Dict[str, torch.Tensor] = {}
-        for modality, cols in self._modality_columns.items():
-            values = row[cols].to_numpy(dtype=np.float32, copy=True)
-            features[modality] = torch.from_numpy(values)
+        for modality, index_tensor in self._modality_index_tensors.items():
+            values = row.index_select(0, index_tensor)
+            if values.ndim == 0:
+                values = values.unsqueeze(0)
+            features[modality] = values.clone().float()
 
-        label = torch.tensor(int(row["activity_id"])).long()
+        label_value = row[self._activity_col_index].item()
+        label = torch.tensor(int(label_value)).long()
         return features, label
 
     def __len__(self) -> int:
@@ -388,19 +414,35 @@ def create_dataloaders(
     else:
         # Load real datasets
         train_dataset = MultimodalDataset(
-            data_dir, modalities, "train", modality_dropout=modality_dropout
+            data_dir,
+            modalities,
+            "train",
+            modality_dropout=modality_dropout,
+            prefetch_shards=True,
         )
-        val_dataset = MultimodalDataset(data_dir, modalities, "val")
-        test_dataset = MultimodalDataset(data_dir, modalities, "test")
+        val_dataset = MultimodalDataset(
+            data_dir,
+            modalities,
+            "val",
+            prefetch_shards=True,
+        )
+        test_dataset = MultimodalDataset(
+            data_dir,
+            modalities,
+            "test",
+            prefetch_shards=True,
+        )
 
     # Create dataloaders
+    persistent_workers = num_workers > 0
     train_loader = data.DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
         collate_fn=collate_multimodal,
-        pin_memory=True,
+        pin_memory=False,
+        persistent_workers=persistent_workers,
     )
 
     val_loader = data.DataLoader(
@@ -409,7 +451,8 @@ def create_dataloaders(
         shuffle=False,
         num_workers=num_workers,
         collate_fn=collate_multimodal,
-        pin_memory=True,
+        pin_memory=False,
+        persistent_workers=persistent_workers,
     )
 
     test_loader = data.DataLoader(
@@ -418,7 +461,8 @@ def create_dataloaders(
         shuffle=False,
         num_workers=num_workers,
         collate_fn=collate_multimodal,
-        pin_memory=True,
+        pin_memory=False,
+        persistent_workers=persistent_workers,
     )
 
     return train_loader, val_loader, test_loader

@@ -10,7 +10,8 @@
 - Heart-rate gaps are handled per subject via forward-fill/back-fill followed by a 25-sample rolling median to keep the signal smooth before training consumes it.
 - Sharding: outputs live under `data/processed/subject_<id>/activity_<id>.csv` to keep files <20 MB for Git.
 - Stratification: each run writes `data/splits/{train,val,test}.txt` where every line is `path/to/shard.csv,<rows>`, covering exactly 70/15/15 of total rows across subjects and activities.
-- Loader: `src/data.py` now auto-detects the manifests, lazily reads shard CSVs, slices modality-specific columns (e.g., `imu_hand → hand_*`, `heart_rate → heart_rate_bpm`), caches a few shards, and falls back to the legacy `.npy` layout when manifests aren’t present.
+- Tensor shards: preprocessing now also emits `data/processed_tensors/subject_<id>/activity_<id>.pt` so the loader can keep each shard in memory and avoid repeated CSV parsing.
+- Loader: `src/data.py` now auto-detects the manifests, loads tensor shards (prefetching by default), slices modality-specific columns (e.g., `imu_hand → hand_*`, `heart_rate → heart_rate_bpm`), and falls back to the legacy `.npy` layout when manifests aren’t present.
 
 ## formatting/linting/type checking
 - formatting and linting done with ruff
