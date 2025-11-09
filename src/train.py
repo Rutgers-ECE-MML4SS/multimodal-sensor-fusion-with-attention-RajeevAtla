@@ -35,6 +35,7 @@ class MultimodalFusionModule(pl.LightningModule):
     criterion: nn.Module
     train_metrics: List[Dict[str, float]]
     val_metrics: List[Dict[str, float]]
+    use_layer_norm: bool
 
     def __init__(self, config: DictConfig):
         """
@@ -49,7 +50,9 @@ class MultimodalFusionModule(pl.LightningModule):
         # Build encoders for each modality
         self.encoders = nn.ModuleDict()
         modality_output_dims = {}
-        self.use_layer_norm = bool(config.model.get("layer_norm", False))
+        cast_self.use_layer_norm = bool(
+            config.model.get("layer_norm", False)
+        )
         self.layer_norms = nn.ModuleDict()
 
         for modality in config.dataset.modalities:

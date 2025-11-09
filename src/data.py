@@ -232,10 +232,20 @@ class MultimodalDataset(data.Dataset):
             self._shard_cache.popitem(last=False)
         return payload
 
+    def _require_labels(self) -> np.ndarray:
+        """Return loaded labels, raising if they are unavailable."""
+
+        if self.labels is None:
+            raise RuntimeError(
+                "Labels are not loaded for this dataset split."
+            )
+        return self.labels
+
     def __len__(self) -> int:
         if self.use_manifest:
             return len(self._chunks)
-        return len(self.labels)
+        labels = self._require_labels()
+        return len(labels)
 
     def __getitem__(
         self, idx: int
@@ -266,7 +276,8 @@ class MultimodalDataset(data.Dataset):
             for modality in self.modalities:
                 feat = self.data[modality][idx]
                 features[modality] = torch.from_numpy(feat).float()
-            label = torch.tensor(self.labels[idx]).long()
+            labels = self._require_labels()
+            label = torch.tensor(labels[idx]).long()
 
         # Apply data augmentation if provided
         if self.transform is not None:

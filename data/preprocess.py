@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import List, Sequence
 
 import polars as pl
 import torch
@@ -282,7 +282,7 @@ def merge_raw_files(raw_dir: Path, output_path: Path) -> Path:
     return output_path
 
 
-def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments."""
 
     parser = argparse.ArgumentParser(
@@ -300,7 +300,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_OUTPUT,
         help="Output directory for CSV shards (default: data/processed).",
     )
-    return parser.parse_args(argv)
+    args = argv if argv is None else list(argv)
+    return parser.parse_args(args)
 
 
 def main() -> None:
