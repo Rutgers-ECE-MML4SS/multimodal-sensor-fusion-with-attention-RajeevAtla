@@ -322,6 +322,7 @@ def main():
         prefetch_shards=_cfg_get(config.dataset, "prefetch_shards", True),
         pin_memory=_cfg_get(config.dataset, "pin_memory"),
         persistent_workers=_cfg_get(config.dataset, "persistent_workers"),
+        prefetch_factor=_cfg_get(config.dataset, "prefetch_factor"),
         chunk_cache_dir=_cfg_get(config.dataset, "chunk_cache_dir"),
     )
 

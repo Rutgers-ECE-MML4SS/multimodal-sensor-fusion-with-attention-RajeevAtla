@@ -16,6 +16,7 @@ dataset:
   batch_size: 32  # Adjust for your RAM (16-64 typical for CPU)
   num_workers: 4  # Parallel data loading (0-4 for CPU)
   persistent_workers: true  # Keep dataloader workers alive between epochs
+  prefetch_factor: 4  # Number of batches each worker preloads (requires num_workers>0)
   chunk_size: 1024  # Number of timesteps per manifest chunk
   prefetch_shards: true  # Keep manifest shards resident in RAM
   pin_memory: false  # Enable when running on GPU

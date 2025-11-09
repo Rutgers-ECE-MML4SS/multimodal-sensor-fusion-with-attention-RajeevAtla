@@ -86,6 +86,31 @@ def _write_manifest_file(base: Path, split: str, lines: list[str]) -> Path:
     return path
 
 
+def test_create_dataloaders_prefetch_factor(tmp_path, monkeypatch):
+    modalities = ["mod1"]
+    root = _make_dataset_dir(tmp_path, modalities, num_samples=2)
+
+    calls: list[dict] = []
+
+    class DummyLoader(list):
+        def __init__(self, *args, **kwargs):
+            super().__init__([0])
+            calls.append(kwargs)
+
+    monkeypatch.setattr(data.data, "DataLoader", DummyLoader)
+
+    loaders = data.create_dataloaders(
+        dataset_name="pamap2",
+        data_dir=root,
+        modalities=modalities,
+        batch_size=2,
+        num_workers=2,
+        prefetch_factor=3,
+    )
+    assert len(loaders) == 3
+    assert all(call["prefetch_factor"] == 3 for call in calls)
+
+
 def test_multimodal_dataset_loading_and_dropout(tmp_path, monkeypatch):
     modalities = ["mod1", "mod2"]
     root = _make_dataset_dir(tmp_path, modalities)

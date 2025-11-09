@@ -453,6 +453,7 @@ def main(config: DictConfig):
         prefetch_shards=config.dataset.get("prefetch_shards", True),
         pin_memory=config.dataset.get("pin_memory"),
         persistent_workers=config.dataset.get("persistent_workers"),
+        prefetch_factor=config.dataset.get("prefetch_factor"),
         chunk_cache_dir=config.dataset.get("chunk_cache_dir"),
     )
 

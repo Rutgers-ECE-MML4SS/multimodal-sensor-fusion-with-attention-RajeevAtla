@@ -453,6 +453,7 @@ def create_dataloaders(
     pin_memory: Optional[bool] = None,
     prefetch_shards: bool = True,
     persistent_workers: Optional[bool] = None,
+    prefetch_factor: Optional[int] = None,
     chunk_size: Optional[int] = None,
     chunk_cache_dir: Optional[str] = None,
     **kwargs,
@@ -471,6 +472,8 @@ def create_dataloaders(
             to ``torch.cuda.is_available()``.
         persistent_workers: Set ``DataLoader.persistent_workers`` explicitly.
             ``None`` defaults to enabling persistence when ``num_workers > 0``.
+        prefetch_factor: Override for DataLoader ``prefetch_factor`` (requires
+            ``num_workers > 0``). ``None`` lets PyTorch pick a default.
         **kwargs: Additional dataset-specific arguments
 
     Returns:
@@ -544,6 +547,16 @@ def create_dataloaders(
             stacklevel=2,
         )
         persistent_workers_flag = False
+    if num_workers <= 0:
+        effective_prefetch: Optional[int] = None
+        if prefetch_factor:
+            warnings.warn(
+                "prefetch_factor is ignored when num_workers == 0.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+    else:
+        effective_prefetch = prefetch_factor
 
     def _build_loader(dataset, shuffle: bool) -> data.DataLoader:
         if getattr(dataset, "use_manifest", False):
@@ -552,8 +565,7 @@ def create_dataloaders(
         else:
             loader_batch_size = batch_size
             collate_fn = collate_multimodal
-        return data.DataLoader(
-            dataset,
+        loader_kwargs = dict(
             batch_size=loader_batch_size,
             shuffle=shuffle,
             num_workers=num_workers,
@@ -561,6 +573,9 @@ def create_dataloaders(
             pin_memory=pin_memory_flag,
             persistent_workers=persistent_workers_flag,
         )
+        if effective_prefetch is not None:
+            loader_kwargs["prefetch_factor"] = effective_prefetch
+        return data.DataLoader(dataset, **loader_kwargs)
 
     train_loader = _build_loader(train_dataset, shuffle=True)
     val_loader = _build_loader(val_dataset, shuffle=False)
