@@ -19,8 +19,6 @@ dataset:
   prefetch_shards: true  # Keep manifest shards resident in RAM
   pin_memory: false  # Enable when running on GPU
   chunk_cache_dir: ./data/splits/cache  # Where cached chunk metadata is stored
-  use_tmpfs: false  # Copy referenced tensor shards into tmpfs before training
-  tmpfs_root: /dev/shm/a2_dataset  # Target directory when use_tmpfs is true
 
 # Model configuration
 model:
@@ -76,10 +74,8 @@ training:
   gradient_accumulation: 2
   enable_compile: true
   compile_backend: inductor
-  compile_mode: max-autotune
+  compile_mode: reduce-overhead
   compile_cache_size: 8
-  cpu_autocast: true
-  matmul_precision: high
   early_stopping_patience: 10
   label_smoothing: 0.05
   

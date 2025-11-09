@@ -20,7 +20,6 @@
   - `dataset.prefetch_shards` toggles whether manifest shards stay pinned in RAM.
   - `dataset.pin_memory` controls DataLoader pinning (handy for GPU experiments).
   - Chunk metadata is cached under `dataset.chunk_cache_dir` so reruns don’t recompute shard windows; delete the `.pt` files if chunk sizes change.
-  - `dataset.use_tmpfs=true` copies referenced manifest shards into `/dev/shm` (or your configured `tmpfs_root`) before training, which cuts repeated disk I/O on constrained runners.
 
 ## formatting/linting/type checking
 - formatting and linting done with ruff
@@ -35,7 +34,4 @@
 - Training perf knobs:
   - `training.gradient_accumulation` emulates larger batches even when manifest chunks stay at batch_size=1.
   - Torch threading gets clamped to the 4-core GitHub runner via `_configure_torch_threads`, and `torch.compile` is enabled with a tiny LRU cache so successive runs reuse compiled graphs.
-  - `training.cpu_autocast` + `training.matmul_precision` enable CPU autocast/bfloat16 plus `torch.set_float32_matmul_precision` for faster matmuls when you’re stuck on CPUs.
-  - Results JSON writes now happen through a background thread so the main training loop doesn’t block on slow disk I/O.
-  - CI sweeps use lighter encoder overrides (see `.github/workflows/complete_run.yml`) so each fusion type can finish within the runner time budget while full-fidelity runs still rely on the base config.
   - `model.modality_fold_size` lets you process modalities in smaller folds without altering fusion architectures (set `0` to keep the legacy “all at once” behavior).
