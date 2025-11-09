@@ -28,7 +28,7 @@ jobs:
       - name: Sync dependencies - around 35s
         run: uv sync
         
-      - name: Run training
+      - name: Run training - duration depends on hyperparams
         run: |
           export HYDRA_FULL_ERROR=1
           uv run python src/train.py training.max_epochs=1

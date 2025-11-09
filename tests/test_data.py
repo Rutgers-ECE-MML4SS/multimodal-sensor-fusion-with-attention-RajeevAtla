@@ -12,7 +12,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import data
 
 
-def _make_dataset_dir(tmp_path: Path, modalities: list[str], num_samples: int = 4) -> str:
+def _make_dataset_dir(
+    tmp_path: Path, modalities: list[str], num_samples: int = 4
+) -> str:
     base = tmp_path / "dataset"
     for split in ["train", "val", "test"]:
         split_dir = base / split
@@ -48,7 +50,9 @@ def test_multimodal_dataset_loading_and_dropout(tmp_path, monkeypatch):
 
     # Transform applied and dropout fallback keeps at least one modality
     for idx, (modality, tensor) in enumerate(features.items()):
-        expected = float(idx + 2)  # Original value (idx+1) plus transform offset
+        expected = float(
+            idx + 2
+        )  # Original value (idx+1) plus transform offset
         assert torch.allclose(tensor, torch.full_like(tensor, expected))
     assert label.item() == 0
     assert mask.sum() == 1  # Dropout forced to keep a single modality
@@ -73,7 +77,10 @@ def test_multimodal_dataset_loading_and_dropout(tmp_path, monkeypatch):
 def test_synthetic_dataset_and_collate():
     modalities = {"sensor1": 4, "sensor2": 3}
     synthetic = data.SyntheticMultimodalDataset(
-        num_samples=5, num_classes=3, modality_dims=modalities, sequence_length=2
+        num_samples=5,
+        num_classes=3,
+        modality_dims=modalities,
+        sequence_length=2,
     )
     default_modalities = data.SyntheticMultimodalDataset(num_samples=2)
 
@@ -89,7 +96,9 @@ def test_synthetic_dataset_and_collate():
     }
 
     batch = [synthetic[i] for i in range(2)]
-    collated_features, collated_labels, collated_masks = data.collate_multimodal(batch)
+    collated_features, collated_labels, collated_masks = (
+        data.collate_multimodal(batch)
+    )
 
     assert collated_features["sensor1"].shape[0] == 2
     assert collated_labels.shape == torch.Size([2])

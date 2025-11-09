@@ -85,7 +85,13 @@ def test_plotting_functions_create_outputs(tmp_path):
         save_path=empty_bin_path,
     )
 
-    for path in [fusion_path, missing_path, attention_path, calibration_path, empty_bin_path]:
+    for path in [
+        fusion_path,
+        missing_path,
+        attention_path,
+        calibration_path,
+        empty_bin_path,
+    ]:
         assert path.exists()
         assert path.stat().st_size > 0
 
@@ -119,8 +125,12 @@ def test_generate_all_plots_handles_missing_files(tmp_path, capsys):
 def test_analysis_main_cli(tmp_path, monkeypatch):
     experiment_dir = tmp_path / "cli_exp"
     experiment_dir.mkdir()
-    (experiment_dir / "fusion_comparison.json").write_text(json.dumps(_fusion_results()))
-    (experiment_dir / "missing_modality.json").write_text(json.dumps(_missing_results()))
+    (experiment_dir / "fusion_comparison.json").write_text(
+        json.dumps(_fusion_results())
+    )
+    (experiment_dir / "missing_modality.json").write_text(
+        json.dumps(_missing_results())
+    )
 
     output_dir = tmp_path / "cli_output"
     monkeypatch.setattr(
@@ -145,8 +155,12 @@ def test_analysis_main_uses_default_cli_paths(tmp_path, monkeypatch):
     experiments_dir = tmp_path / "experiments"
     experiments_dir.mkdir()
 
-    (experiments_dir / "fusion_comparison.json").write_text(json.dumps(_fusion_results()))
-    (experiments_dir / "missing_modality.json").write_text(json.dumps(_missing_results()))
+    (experiments_dir / "fusion_comparison.json").write_text(
+        json.dumps(_fusion_results())
+    )
+    (experiments_dir / "missing_modality.json").write_text(
+        json.dumps(_missing_results())
+    )
 
     monkeypatch.setattr(sys, "argv", ["analysis.py"])
     analysis.main()

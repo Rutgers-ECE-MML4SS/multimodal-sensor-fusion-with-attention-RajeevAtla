@@ -21,7 +21,9 @@ class DummyModel(torch.nn.Module):
     def forward(self, features, mask):
         summed = torch.zeros(next(iter(features.values())).shape[0])
         for idx, tensor in enumerate(features.values()):
-            weight = mask[:, idx] if mask is not None else torch.ones_like(summed)
+            weight = (
+                mask[:, idx] if mask is not None else torch.ones_like(summed)
+            )
             summed = summed + tensor.sum(dim=1) * weight
 
         logits = torch.stack(
@@ -33,7 +35,8 @@ class DummyModel(torch.nn.Module):
 
 def _make_batch(batch_size=2, num_modalities=2):
     features = {
-        f"mod{i}": torch.ones(batch_size, 4) * (i + 1) for i in range(num_modalities)
+        f"mod{i}": torch.ones(batch_size, 4) * (i + 1)
+        for i in range(num_modalities)
     }
     labels = torch.tensor(list(range(batch_size))) % 3
     mask = torch.ones(batch_size, num_modalities)
@@ -135,7 +138,9 @@ def _configure_cli_mocks(monkeypatch, tmp_path, missing: bool = False):
                 },
             )()
             model_cfg = type("ModelCfg", (), {"fusion_type": "hybrid"})()
-            self.config = type("Config", (), {"dataset": dataset_cfg, "model": model_cfg})()
+            self.config = type(
+                "Config", (), {"dataset": dataset_cfg, "model": model_cfg}
+            )()
 
         def eval(self):
             return self
@@ -184,7 +189,9 @@ def _configure_cli_mocks(monkeypatch, tmp_path, missing: bool = False):
     monkeypatch.setattr(
         evaluation,
         "evaluate_missing_modalities",
-        fake_missing if missing else lambda *a, **k: pytest.fail(
+        fake_missing
+        if missing
+        else lambda *a, **k: pytest.fail(
             "Missing modality branch should not execute without flag"
         ),
     )
@@ -211,7 +218,9 @@ def _configure_cli_mocks(monkeypatch, tmp_path, missing: bool = False):
 
 
 def test_eval_main_cli_standard(tmp_path, monkeypatch, capsys):
-    output_dir, _, evaluate_missing_spy = _configure_cli_mocks(monkeypatch, tmp_path)
+    output_dir, _, evaluate_missing_spy = _configure_cli_mocks(
+        monkeypatch, tmp_path
+    )
     evaluation.main()
 
     captured = capsys.readouterr().out
@@ -266,7 +275,9 @@ def test_eval_script_entrypoint_runs(tmp_path, monkeypatch, capsys):
                 },
             )()
             model_cfg = type("ModelCfg", (), {"fusion_type": "hybrid"})()
-            self.config = type("Config", (), {"dataset": dataset_cfg, "model": model_cfg})()
+            self.config = type(
+                "Config", (), {"dataset": dataset_cfg, "model": model_cfg}
+            )()
 
     class LoaderWrapper:
         @staticmethod
@@ -294,11 +305,21 @@ def test_eval_script_entrypoint_runs(tmp_path, monkeypatch, capsys):
     monkeypatch.setitem(system_mod.modules, "tqdm", tqdm_stub)
     monkeypatch.setitem(system_mod.modules, "train", types.ModuleType("train"))
     monkeypatch.setitem(system_mod.modules, "data", types.ModuleType("data"))
-    monkeypatch.setitem(system_mod.modules, "uncertainty", types.ModuleType("uncertainty"))
+    monkeypatch.setitem(
+        system_mod.modules, "uncertainty", types.ModuleType("uncertainty")
+    )
 
-    setattr(system_mod.modules["train"], "MultimodalFusionModule", LoaderWrapper)
-    setattr(system_mod.modules["data"], "create_dataloaders", dataloader_factory)
-    setattr(system_mod.modules["uncertainty"], "CalibrationMetrics", CalibrationWrapper)
+    setattr(
+        system_mod.modules["train"], "MultimodalFusionModule", LoaderWrapper
+    )
+    setattr(
+        system_mod.modules["data"], "create_dataloaders", dataloader_factory
+    )
+    setattr(
+        system_mod.modules["uncertainty"],
+        "CalibrationMetrics",
+        CalibrationWrapper,
+    )
 
     argv = [
         "eval.py",

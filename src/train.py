@@ -205,7 +205,9 @@ class MultimodalFusionModule(pl.LightningModule):
                 weight_decay=self.config.training.weight_decay,
             )
         else:
-            raise ValueError(f"Unknown optimizer: {self.config.training.optimizer}")
+            raise ValueError(
+                f"Unknown optimizer: {self.config.training.optimizer}"
+            )
 
         # Learning rate scheduler
         if self.config.training.scheduler == "cosine":
@@ -288,7 +290,9 @@ def main(config: DictConfig):
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    trainable_params = sum(
+        p.numel() for p in model.parameters() if p.requires_grad
+    )
     print(f"Total parameters: {total_params:,}")
     print(f"Trainable parameters: {trainable_params:,}")
 

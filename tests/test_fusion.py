@@ -23,7 +23,9 @@ class TestFusionIntegration:
         """LateFusion should fallback to uniform weights when modalities are missing."""
         torch.manual_seed(0)
         modality_dims = {"video": 4, "imu": 4}
-        model = LateFusion(modality_dims, num_classes=3, hidden_dim=8, dropout=0.0)
+        model = LateFusion(
+            modality_dims, num_classes=3, hidden_dim=8, dropout=0.0
+        )
         model.eval()
 
         features = {
@@ -41,9 +43,9 @@ class TestFusionIntegration:
         expected_uniform = (
             per_mod_logits["video"][1] + per_mod_logits["imu"][1]
         ) / 2.0
-        assert torch.allclose(
-            fused_logits[1], expected_uniform, atol=1e-6
-        ), "Fallback should average logits when all modalities missing."
+        assert torch.allclose(fused_logits[1], expected_uniform, atol=1e-6), (
+            "Fallback should average logits when all modalities missing."
+        )
 
     def test_hybrid_fusion_adaptive_weights(self):
         """HybridFusion adaptive weights should respect modality availability."""
@@ -62,9 +64,7 @@ class TestFusionIntegration:
             [[1.0, 1.0], [1.0, 0.0], [0.0, 0.0]], dtype=torch.float32
         )
 
-        logits, attention_info = model(
-            features, mask, return_attention=True
-        )
+        logits, attention_info = model(features, mask, return_attention=True)
         fusion_weights = attention_info["fusion_weights"]
 
         assert fusion_weights.shape == mask.shape
@@ -156,7 +156,9 @@ class TestFusionInterfaces:
     ):
         """Test HybridFusion output shape."""
         try:
-            model = HybridFusion(modality_dims, num_classes=num_classes, num_heads=4)
+            model = HybridFusion(
+                modality_dims, num_classes=num_classes, num_heads=4
+            )
             output = model(sample_features, sample_mask, return_attention=False)
 
             if isinstance(output, tuple):
@@ -176,7 +178,9 @@ class TestFusionInterfaces:
     ):
         """Test HybridFusion returns attention weights when requested."""
         try:
-            model = HybridFusion(modality_dims, num_classes=num_classes, num_heads=4)
+            model = HybridFusion(
+                modality_dims, num_classes=num_classes, num_heads=4
+            )
             logits, attention_info = model(
                 sample_features, sample_mask, return_attention=True
             )
@@ -295,7 +299,9 @@ class TestFusionValidation:
     def test_early_fusion_creates_default_mask(self):
         modality_dims = {"video": 4, "imu": 4}
         model = EarlyFusion(modality_dims, num_classes=2)
-        features = {mod: torch.randn(2, dim) for mod, dim in modality_dims.items()}
+        features = {
+            mod: torch.randn(2, dim) for mod, dim in modality_dims.items()
+        }
         logits = model(features, None)
         assert logits.shape == (2, 2)
 
@@ -323,7 +329,9 @@ class TestFusionValidation:
     def test_late_fusion_creates_default_mask(self):
         modality_dims = {"video": 4, "imu": 4}
         model = LateFusion(modality_dims, num_classes=2)
-        features = {mod: torch.randn(2, dim) for mod, dim in modality_dims.items()}
+        features = {
+            mod: torch.randn(2, dim) for mod, dim in modality_dims.items()
+        }
         logits, per_mod = model(features, None)
         assert logits.shape == (2, 2)
         assert set(per_mod.keys()) == set(modality_dims)
@@ -354,7 +362,9 @@ class TestFusionValidation:
     def test_hybrid_fusion_default_mask(self):
         modality_dims = {"video": 4, "imu": 4}
         model = HybridFusion(modality_dims, num_classes=2, num_heads=1)
-        features = {mod: torch.randn(2, dim) for mod, dim in modality_dims.items()}
+        features = {
+            mod: torch.randn(2, dim) for mod, dim in modality_dims.items()
+        }
         logits = model(features, None)
         if isinstance(logits, tuple):
             logits = logits[0]
@@ -383,7 +393,9 @@ class TestFusionValidation:
         modality_dims = {"video": 4, "imu": 4}
         model = HybridFusion(modality_dims, num_classes=3, num_heads=1)
         del model.attention_modules["video_to_imu"]
-        features = {mod: torch.randn(2, dim) for mod, dim in modality_dims.items()}
+        features = {
+            mod: torch.randn(2, dim) for mod, dim in modality_dims.items()
+        }
         mask = torch.ones(2, 2)
         logits, info = model(features, mask, return_attention=True)
         assert "video_to_imu" not in info["attention_maps"]
@@ -408,7 +420,11 @@ class TestFusionValidation:
             raise RuntimeError("boom")
 
         lines = Path("src/fusion.py").read_text().splitlines()
-        start = next(idx for idx, line in enumerate(lines) if line.startswith("if __name__"))
+        start = next(
+            idx
+            for idx, line in enumerate(lines)
+            if line.startswith("if __name__")
+        )
         block = "\n" * start + "\n".join(lines[start:])
 
         namespace = dict(fusion_module.__dict__)

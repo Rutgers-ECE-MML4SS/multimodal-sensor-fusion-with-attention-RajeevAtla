@@ -222,9 +222,12 @@ class LateFusion(nn.Module):
             logits_stack, dim=1
         )  # (batch, num_modalities, num_classes)
 
-        base_weights = torch.softmax(self.weight_logits, dim=0)  # (num_modalities,)
+        base_weights = torch.softmax(
+            self.weight_logits, dim=0
+        )  # (num_modalities,)
         weights = (
-            base_weights.unsqueeze(0).expand(batch_size, -1).to(device) * modality_mask
+            base_weights.unsqueeze(0).expand(batch_size, -1).to(device)
+            * modality_mask
         )
         weight_sums = weights.sum(dim=1, keepdim=True)
 
@@ -233,7 +236,9 @@ class LateFusion(nn.Module):
             weight_sums > 0, weights / (weight_sums + 1e-8), uniform_weights
         )
 
-        fused_logits = (stacked_logits * normalized_weights.unsqueeze(-1)).sum(dim=1)
+        fused_logits = (stacked_logits * normalized_weights.unsqueeze(-1)).sum(
+            dim=1
+        )
         return fused_logits, per_modality_logits
 
 
@@ -294,17 +299,22 @@ class HybridFusion(nn.Module):
             for key_mod in self.modality_names:
                 if query_mod == key_mod:
                     continue
-                attention_modules[f"{query_mod}_to_{key_mod}"] = CrossModalAttention(
-                    query_dim=hidden_dim,
-                    key_dim=hidden_dim,
-                    hidden_dim=hidden_dim,
-                    num_heads=num_heads,
-                    dropout=dropout,
+                attention_modules[f"{query_mod}_to_{key_mod}"] = (
+                    CrossModalAttention(
+                        query_dim=hidden_dim,
+                        key_dim=hidden_dim,
+                        hidden_dim=hidden_dim,
+                        num_heads=num_heads,
+                        dropout=dropout,
+                    )
                 )
         self.attention_modules = nn.ModuleDict(attention_modules)
 
         self.gating_layers = nn.ModuleDict(
-            {modality: nn.Linear(hidden_dim, 1) for modality in self.modality_names}
+            {
+                modality: nn.Linear(hidden_dim, 1)
+                for modality in self.modality_names
+            }
         )
 
         self.classifier = nn.Sequential(
@@ -363,7 +373,8 @@ class HybridFusion(nn.Module):
         aggregated: Dict[str, torch.Tensor] = {}
         attention_maps: Dict[str, torch.Tensor] = {}
         modality_lists = {
-            modality: [projected_features[modality]] for modality in self.modality_names
+            modality: [projected_features[modality]]
+            for modality in self.modality_names
         }
 
         for query_mod in self.modality_names:
@@ -376,7 +387,9 @@ class HybridFusion(nn.Module):
 
                 key_index = self.modality_names.index(key_mod)
                 key_mask = (
-                    modality_mask[:, key_index] if modality_mask is not None else None
+                    modality_mask[:, key_index]
+                    if modality_mask is not None
+                    else None
                 )
                 attended, attn_weights = self.attention_modules[attention_key](
                     projected_features[query_mod],
@@ -391,13 +404,15 @@ class HybridFusion(nn.Module):
             stacked = torch.stack(modality_lists[modality], dim=0).mean(dim=0)
             aggregated[modality] = stacked * modality_mask[:, idx].unsqueeze(-1)
 
-        fusion_weights = self.compute_adaptive_weights(aggregated, modality_mask)
+        fusion_weights = self.compute_adaptive_weights(
+            aggregated, modality_mask
+        )
         modality_tensor = torch.stack(
             [aggregated[mod] for mod in self.modality_names], dim=1
         )
-        fused_representation = (modality_tensor * fusion_weights.unsqueeze(-1)).sum(
-            dim=1
-        )
+        fused_representation = (
+            modality_tensor * fusion_weights.unsqueeze(-1)
+        ).sum(dim=1)
         logits = self.classifier(fused_representation)
 
         if return_attention:
@@ -409,7 +424,9 @@ class HybridFusion(nn.Module):
         return logits
 
     def compute_adaptive_weights(
-        self, modality_features: Dict[str, torch.Tensor], modality_mask: torch.Tensor
+        self,
+        modality_features: Dict[str, torch.Tensor],
+        modality_mask: torch.Tensor,
     ) -> torch.Tensor:
         """
         Compute adaptive fusion weights based on modality availability.
@@ -422,7 +439,9 @@ class HybridFusion(nn.Module):
             weights: (batch_size, num_modalities) normalized fusion weights
         """
         if modality_mask is None:
-            raise ValueError("modality_mask must be provided for adaptive weighting.")
+            raise ValueError(
+                "modality_mask must be provided for adaptive weighting."
+            )
 
         device = modality_mask.device
         modality_mask = modality_mask.to(device=device)
@@ -451,7 +470,9 @@ class HybridFusion(nn.Module):
             mask / (mask_sum + 1e-8),
             torch.full_like(mask, 1.0 / self.num_modalities),
         )
-        weights = torch.where(sum_weights > 0, weights / (sum_weights + 1e-8), fallback)
+        weights = torch.where(
+            sum_weights > 0, weights / (sum_weights + 1e-8), fallback
+        )
         return weights
 
 
@@ -519,7 +540,9 @@ if __name__ == "__main__":
             assert logits.shape == (batch_size, num_classes), (
                 f"Expected shape ({batch_size}, {num_classes}), got {logits.shape}"
             )
-            print(f"✓ {fusion_type} fusion working! Output shape: {logits.shape}")
+            print(
+                f"✓ {fusion_type} fusion working! Output shape: {logits.shape}"
+            )
 
         except NotImplementedError:
             print(f"✗ {fusion_type} fusion not implemented yet")

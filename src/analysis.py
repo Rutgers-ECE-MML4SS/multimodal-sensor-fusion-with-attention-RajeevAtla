@@ -38,14 +38,18 @@ def plot_fusion_comparison(
     accuracies = [results["results"][s]["accuracy"] for s in strategies]
     f1_scores = [results["results"][s]["f1_macro"] for s in strategies]
     eces = [results["results"][s]["ece"] for s in strategies]
-    inference_times = [results["results"][s]["inference_ms"] for s in strategies]
+    inference_times = [
+        results["results"][s]["inference_ms"] for s in strategies
+    ]
 
     # Create figure with subplots
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     fig.suptitle("Fusion Strategy Comparison", fontsize=16, fontweight="bold")
 
     # Accuracy comparison
-    axes[0, 0].bar(strategies, accuracies, color=["#1f77b4", "#ff7f0e", "#2ca02c"])
+    axes[0, 0].bar(
+        strategies, accuracies, color=["#1f77b4", "#ff7f0e", "#2ca02c"]
+    )
     axes[0, 0].set_ylabel("Accuracy", fontsize=12)
     axes[0, 0].set_title("Test Accuracy", fontsize=12)
     axes[0, 0].set_ylim([0, 1.0])
@@ -53,7 +57,9 @@ def plot_fusion_comparison(
         axes[0, 0].text(i, v + 0.02, f"{v:.3f}", ha="center", fontsize=10)
 
     # F1 score comparison
-    axes[0, 1].bar(strategies, f1_scores, color=["#1f77b4", "#ff7f0e", "#2ca02c"])
+    axes[0, 1].bar(
+        strategies, f1_scores, color=["#1f77b4", "#ff7f0e", "#2ca02c"]
+    )
     axes[0, 1].set_ylabel("F1 Score (macro)", fontsize=12)
     axes[0, 1].set_title("F1 Score", fontsize=12)
     axes[0, 1].set_ylim([0, 1.0])
@@ -70,7 +76,9 @@ def plot_fusion_comparison(
         axes[1, 0].text(i, v + 0.005, f"{v:.3f}", ha="center", fontsize=10)
 
     # Inference time comparison
-    axes[1, 1].bar(strategies, inference_times, color=["#1f77b4", "#ff7f0e", "#2ca02c"])
+    axes[1, 1].bar(
+        strategies, inference_times, color=["#1f77b4", "#ff7f0e", "#2ca02c"]
+    )
     axes[1, 1].set_ylabel("Inference Time (ms)", fontsize=12)
     axes[1, 1].set_title("Inference Speed", fontsize=12)
     for i, v in enumerate(inference_times):
@@ -256,9 +264,13 @@ def plot_calibration_diagram(
     bin_counts = []
 
     for i in range(num_bins):
-        bin_mask = (confidences >= bin_edges[i]) & (confidences < bin_edges[i + 1])
+        bin_mask = (confidences >= bin_edges[i]) & (
+            confidences < bin_edges[i + 1]
+        )
         if i == num_bins - 1:  # Include right edge in last bin
-            bin_mask = (confidences >= bin_edges[i]) & (confidences <= bin_edges[i + 1])
+            bin_mask = (confidences >= bin_edges[i]) & (
+                confidences <= bin_edges[i + 1]
+            )
 
         if bin_mask.sum() > 0:
             bin_conf = confidences[bin_mask].mean()
@@ -362,7 +374,9 @@ def generate_all_plots(
             results = json.load(f)
         plot_fusion_comparison(results, output_path / "fusion_comparison.png")
     else:
-        print(f"\nWarning: {fusion_file} not found. Skipping fusion comparison plot.")
+        print(
+            f"\nWarning: {fusion_file} not found. Skipping fusion comparison plot."
+        )
 
     # Plot missing modality robustness
     missing_file = experiment_path / "missing_modality.json"
@@ -374,7 +388,9 @@ def generate_all_plots(
             results, output_path / "missing_modality.png"
         )
     else:
-        print(f"\nWarning: {missing_file} not found. Skipping missing modality plot.")
+        print(
+            f"\nWarning: {missing_file} not found. Skipping missing modality plot."
+        )
 
     # Note: Attention and calibration plots require model outputs
     # Students should call these functions directly with their data
@@ -398,7 +414,10 @@ def main():
         help="Directory with experiment JSON files",
     )
     parser.add_argument(
-        "--output_dir", type=str, default="analysis", help="Directory to save plots"
+        "--output_dir",
+        type=str,
+        default="analysis",
+        help="Directory to save plots",
     )
 
     args = parser.parse_args()

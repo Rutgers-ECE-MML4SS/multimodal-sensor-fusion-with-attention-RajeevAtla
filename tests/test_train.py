@@ -81,7 +81,9 @@ def test_configure_optimizers_branches(tmp_path):
     config_step = _base_config(tmp_path, scheduler="step")
     module_step = train.MultimodalFusionModule(config_step)
     result_step = module_step.configure_optimizers()
-    assert result_step["lr_scheduler"]["scheduler"].__class__.__name__ == "StepLR"
+    assert (
+        result_step["lr_scheduler"]["scheduler"].__class__.__name__ == "StepLR"
+    )
 
     config_none = _base_config(tmp_path, scheduler="none")
     module_none = train.MultimodalFusionModule(config_none)
@@ -143,7 +145,11 @@ def test_train_main_invocation(tmp_path, monkeypatch):
 
     train.main.__wrapped__(config)
 
-    results_path = Path(config.experiment.save_dir) / config.experiment.name / "results.json"
+    results_path = (
+        Path(config.experiment.save_dir)
+        / config.experiment.name
+        / "results.json"
+    )
     assert results_path.exists()
     saved = json.loads(results_path.read_text())
     assert "best_model_path" in saved and "best_val_loss" in saved
@@ -197,7 +203,9 @@ def test_cosine_scheduler_parameters(tmp_path):
     scheduler = optim_config["lr_scheduler"]["scheduler"]
     assert isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR)
     assert scheduler.T_max == config.training.max_epochs
-    assert scheduler.eta_min == pytest.approx(config.training.learning_rate / 100)
+    assert scheduler.eta_min == pytest.approx(
+        config.training.learning_rate / 100
+    )
 
     config_step = _base_config(tmp_path, scheduler="step")
     module_step = train.MultimodalFusionModule(config_step)
@@ -215,7 +223,9 @@ def test_train_entrypoint_executes_main(monkeypatch):
         calls.append(True)
 
     lines = Path("src/train.py").read_text().splitlines()
-    start = next(idx for idx, line in enumerate(lines) if line.startswith("if __name__"))
+    start = next(
+        idx for idx, line in enumerate(lines) if line.startswith("if __name__")
+    )
     block = "\n" * start + "\n".join(lines[start:])
 
     namespace = {"__name__": "__main__", "main": fake_main}

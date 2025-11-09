@@ -32,7 +32,12 @@ class TestCrossModalAttention:
 
     @pytest.fixture
     def attention_params(self):
-        return {"query_dim": 512, "key_dim": 64, "hidden_dim": 256, "num_heads": 4}
+        return {
+            "query_dim": 512,
+            "key_dim": 64,
+            "hidden_dim": 256,
+            "num_heads": 4,
+        }
 
     @pytest.fixture
     def batch_size(self):
@@ -49,7 +54,10 @@ class TestCrossModalAttention:
 
             attended, weights = attn(query, key, value)
 
-            assert attended.shape == (batch_size, attention_params["hidden_dim"]), (
+            assert attended.shape == (
+                batch_size,
+                attention_params["hidden_dim"],
+            ), (
                 f"Expected shape ({batch_size}, {attention_params['hidden_dim']}), got {attended.shape}"
             )
             assert weights is not None, "Attention weights should be returned"
@@ -64,11 +72,15 @@ class TestCrossModalAttention:
             query = torch.randn(batch_size, attention_params["query_dim"])
             key = torch.randn(batch_size, attention_params["key_dim"])
             value = torch.randn(batch_size, attention_params["key_dim"])
-            mask = torch.tensor([1, 1, 0, 1], dtype=torch.float)  # Third key masked
+            mask = torch.tensor(
+                [1, 1, 0, 1], dtype=torch.float
+            )  # Third key masked
 
             attended, weights = attn(query, key, value, mask)
 
-            assert not torch.isnan(attended).any(), "Output contains NaN with mask"
+            assert not torch.isnan(attended).any(), (
+                "Output contains NaN with mask"
+            )
         except NotImplementedError:
             pytest.skip("CrossModalAttention not implemented yet")
 
@@ -77,9 +89,15 @@ class TestCrossModalAttention:
         try:
             attn = CrossModalAttention(**attention_params)
 
-            query = torch.randn(2, attention_params["query_dim"], requires_grad=True)
-            key = torch.randn(2, attention_params["key_dim"], requires_grad=True)
-            value = torch.randn(2, attention_params["key_dim"], requires_grad=True)
+            query = torch.randn(
+                2, attention_params["query_dim"], requires_grad=True
+            )
+            key = torch.randn(
+                2, attention_params["key_dim"], requires_grad=True
+            )
+            value = torch.randn(
+                2, attention_params["key_dim"], requires_grad=True
+            )
 
             attended, _ = attn(query, key, value)
             loss = attended.sum()
@@ -113,7 +131,11 @@ class TestTemporalAttention:
             attended_seq, weights = attn(sequence_data)
 
             batch_size, seq_len, _ = sequence_data.shape
-            expected_shape = (batch_size, seq_len, attention_params["hidden_dim"])
+            expected_shape = (
+                batch_size,
+                seq_len,
+                attention_params["hidden_dim"],
+            )
 
             assert attended_seq.shape == expected_shape, (
                 f"Expected shape {expected_shape}, got {attended_seq.shape}"
@@ -129,13 +151,17 @@ class TestTemporalAttention:
 
             batch_size = 2
             seq_len = 10
-            sequence = torch.randn(batch_size, seq_len, attention_params["feature_dim"])
+            sequence = torch.randn(
+                batch_size, seq_len, attention_params["feature_dim"]
+            )
             mask = torch.zeros(batch_size, seq_len)
             mask[0, :7] = 1
             mask[1, :5] = 1
 
             attended_seq, _ = attn(sequence, mask)
-            assert not torch.isnan(attended_seq).any(), "Output contains NaN with mask"
+            assert not torch.isnan(attended_seq).any(), (
+                "Output contains NaN with mask"
+            )
         except NotImplementedError:
             pytest.skip("TemporalAttention not implemented yet")
 
@@ -144,7 +170,9 @@ class TestTemporalAttention:
         try:
             attn = TemporalAttention(**attention_params)
             batch_size, seq_len = 2, 6
-            sequence = torch.randn(batch_size, seq_len, attention_params["feature_dim"])
+            sequence = torch.randn(
+                batch_size, seq_len, attention_params["feature_dim"]
+            )
             mask = torch.tensor([1, 0, 1, 0, 1, 1], dtype=torch.float32)
 
             attended, _ = attn(sequence, mask)
@@ -174,6 +202,7 @@ class TestTemporalAttention:
         except NotImplementedError:
             pytest.skip("TemporalAttention not implemented yet")
 
+
 class TestPairwiseModalityAttention:
     """Test PairwiseModalityAttention module."""
 
@@ -198,7 +227,9 @@ class TestPairwiseModalityAttention:
 
             attended_features, attention_maps = attn(modality_features)
 
-            assert isinstance(attended_features, dict), "Should return dict of features"
+            assert isinstance(attended_features, dict), (
+                "Should return dict of features"
+            )
             assert isinstance(attention_maps, dict), (
                 "Should return dict of attention maps"
             )
@@ -207,7 +238,6 @@ class TestPairwiseModalityAttention:
             )
         except NotImplementedError:
             pytest.skip("PairwiseModalityAttention not implemented yet")
-
 
     def test_requires_modalities(self):
         """Ensure missing modality configuration raises a helpful error."""
@@ -236,7 +266,9 @@ class TestPairwiseModalityAttention:
         masked_idx = attn.modality_names.index("audio")
         assert torch.allclose(
             attended["audio"][modality_mask[:, masked_idx] == 0],
-            torch.zeros_like(attended["audio"][modality_mask[:, masked_idx] == 0]),
+            torch.zeros_like(
+                attended["audio"][modality_mask[:, masked_idx] == 0]
+            ),
         )
 
 
@@ -293,7 +325,8 @@ class TestVisualizeAttention:
         close_calls: list[object] = []
 
         monkeypatch.setattr(
-            "matplotlib.pyplot.subplots", lambda figsize=None: (dummy_fig, dummy_ax)
+            "matplotlib.pyplot.subplots",
+            lambda figsize=None: (dummy_fig, dummy_ax),
         )
         monkeypatch.setattr(
             "matplotlib.pyplot.colorbar", lambda *args, **kwargs: None
@@ -310,15 +343,22 @@ class TestVisualizeAttention:
 
         visualize_attention(tensor, modality_names, save_path=str(save_path))
 
-        assert dummy_ax.imshow_data is not None, "Expected heatmap passed to imshow"
+        assert dummy_ax.imshow_data is not None, (
+            "Expected heatmap passed to imshow"
+        )
         assert dummy_ax.imshow_data.shape == expected_heatmap.shape
         assert torch.allclose(
-            torch.as_tensor(dummy_ax.imshow_data), torch.as_tensor(expected_heatmap)
+            torch.as_tensor(dummy_ax.imshow_data),
+            torch.as_tensor(expected_heatmap),
         )
         assert dummy_fig.saved_path == save_path
-        assert close_calls == [dummy_fig], "Figure should be closed after saving"
+        assert close_calls == [dummy_fig], (
+            "Figure should be closed after saving"
+        )
 
-    def test_visualize_attention_saves_file(self, modality_names, tmp_path, monkeypatch):
+    def test_visualize_attention_saves_file(
+        self, modality_names, tmp_path, monkeypatch
+    ):
         """Ensure visualize_attention saves figure and skips show when path provided."""
         show_called = False
 
@@ -331,11 +371,17 @@ class TestVisualizeAttention:
         attention_weights = torch.rand(2, 3, 4, 5)
         save_path = tmp_path / "plots" / "attention.png"
 
-        visualize_attention(attention_weights, modality_names, save_path=save_path)
+        visualize_attention(
+            attention_weights, modality_names, save_path=save_path
+        )
 
-        assert save_path.is_file(), "Attention visualization should be saved to disk"
+        assert save_path.is_file(), (
+            "Attention visualization should be saved to disk"
+        )
         assert save_path.stat().st_size > 0, "Saved figure should not be empty"
-        assert not show_called, "plt.show should not be called when save_path is set"
+        assert not show_called, (
+            "plt.show should not be called when save_path is set"
+        )
 
     def test_visualize_attention_scalar_triggers_show(
         self, modality_names, monkeypatch
@@ -350,7 +396,9 @@ class TestVisualizeAttention:
 
         visualize_attention(torch.tensor(0.5), modality_names[:2])
 
-        assert show_calls == [True], "plt.show should be called once when save_path is None"
+        assert show_calls == [True], (
+            "plt.show should be called once when save_path is None"
+        )
 
     def test_visualize_attention_accepts_sequence_input(
         self, modality_names, monkeypatch
@@ -376,12 +424,17 @@ class TestVisualizeAttention:
         def squeezed_numpy(self):
             return np.squeeze(orig_numpy(self))
 
-        monkeypatch.setattr(torch.Tensor, "numpy", squeezed_numpy, raising=False)
+        monkeypatch.setattr(
+            torch.Tensor, "numpy", squeezed_numpy, raising=False
+        )
 
         save_path = tmp_path / "expanded.png"
         extended_names = modality_names + ["lidar"]
-        visualize_attention(torch.arange(6.0).reshape(1, 6), extended_names, save_path)
+        visualize_attention(
+            torch.arange(6.0).reshape(1, 6), extended_names, save_path
+        )
         assert save_path.exists()
+
 
 def test_attention_main_runs(capsys):
     """Run module entrypoint to exercise __main__ coverage."""
@@ -396,7 +449,9 @@ def test_attention_main_handles_errors(monkeypatch, capsys):
 
     lines = Path("src/attention.py").read_text().splitlines()
     start = next(
-        idx for idx, line in enumerate(lines) if line.strip().startswith("# Simple test")
+        idx
+        for idx, line in enumerate(lines)
+        if line.strip().startswith("# Simple test")
     )
     block = "\n".join(lines[start:])
     injected = "\n" * start + textwrap.dedent(block)
@@ -404,23 +459,37 @@ def test_attention_main_handles_errors(monkeypatch, capsys):
     compiled = compile(injected, "src/attention.py", "exec")
     scenarios = [
         (
-            lambda self, *args, **kwargs: (_ for _ in ()).throw(NotImplementedError("stub")),
-            lambda self, *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+            lambda self, *args, **kwargs: (_ for _ in ()).throw(
+                NotImplementedError("stub")
+            ),
+            lambda self, *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("boom")
+            ),
             ["not implemented yet", "temporalattention error"],
         ),
         (
-            lambda self, *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
-            lambda self, *args, **kwargs: (_ for _ in ()).throw(NotImplementedError("stub")),
+            lambda self, *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("boom")
+            ),
+            lambda self, *args, **kwargs: (_ for _ in ()).throw(
+                NotImplementedError("stub")
+            ),
             ["crossmodalattention error", "not implemented yet"],
         ),
     ]
 
     for cross_fn, temporal_fn, expected in scenarios:
         monkeypatch.setattr(
-            attention_module.CrossModalAttention, "forward", cross_fn, raising=False
+            attention_module.CrossModalAttention,
+            "forward",
+            cross_fn,
+            raising=False,
         )
         monkeypatch.setattr(
-            attention_module.TemporalAttention, "forward", temporal_fn, raising=False
+            attention_module.TemporalAttention,
+            "forward",
+            temporal_fn,
+            raising=False,
         )
         namespace = dict(attention_module.__dict__)
         namespace["__name__"] = "__main__"

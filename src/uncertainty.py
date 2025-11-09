@@ -121,8 +121,12 @@ class CalibrationMetrics:
                 continue
 
             bin_confidence = confidences[in_bin].mean()
-            bin_accuracy = (predictions[in_bin] == labels[in_bin]).float().mean()
-            ece += (bin_count / total) * torch.abs(bin_accuracy - bin_confidence)
+            bin_accuracy = (
+                (predictions[in_bin] == labels[in_bin]).float().mean()
+            )
+            ece += (bin_count / total) * torch.abs(
+                bin_accuracy - bin_confidence
+            )
 
         return float(ece.item())
 
@@ -158,14 +162,18 @@ class CalibrationMetrics:
                 continue
 
             bin_confidence = confidences[in_bin].mean()
-            bin_accuracy = (predictions[in_bin] == labels[in_bin]).float().mean()
+            bin_accuracy = (
+                (predictions[in_bin] == labels[in_bin]).float().mean()
+            )
             bin_error = torch.abs(bin_accuracy - bin_confidence)
             max_error = torch.max(max_error, bin_error)
 
         return float(max_error.item())
 
     @staticmethod
-    def negative_log_likelihood(logits: torch.Tensor, labels: torch.Tensor) -> float:
+    def negative_log_likelihood(
+        logits: torch.Tensor, labels: torch.Tensor
+    ) -> float:
         """
         Compute average Negative Log-Likelihood (NLL).
 
@@ -326,7 +334,9 @@ class UncertaintyWeightedFusion(nn.Module):
         weight_list = []
         for modality in modality_names:
             if modality not in modality_uncertainties:
-                raise KeyError(f"Missing uncertainty for modality '{modality}'.")
+                raise KeyError(
+                    f"Missing uncertainty for modality '{modality}'."
+                )
 
             logits = modality_predictions[modality].to(device)
             uncertainty = modality_uncertainties[modality].to(device)
@@ -414,7 +424,9 @@ class TemperatureScaling(nn.Module):
 
         self.temperature.data = torch.ones_like(self.temperature.data)
 
-        optimizer = torch.optim.LBFGS([self.temperature], lr=lr, max_iter=max_iter)
+        optimizer = torch.optim.LBFGS(
+            [self.temperature], lr=lr, max_iter=max_iter
+        )
 
         def closure():
             optimizer.zero_grad()
@@ -481,7 +493,9 @@ class EnsembleUncertainty:
 
 
 def compute_calibration_metrics(
-    model: nn.Module, dataloader: torch.utils.data.DataLoader, device: str = "cpu"
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: str = "cpu",
 ) -> Dict[str, float]:
     """
     Compute all calibration metrics on a dataset.
@@ -525,7 +539,9 @@ def compute_calibration_metrics(
     ece = CalibrationMetrics.expected_calibration_error(
         confidences, predictions, labels
     )
-    mce = CalibrationMetrics.maximum_calibration_error(confidences, predictions, labels)
+    mce = CalibrationMetrics.maximum_calibration_error(
+        confidences, predictions, labels
+    )
     nll = CalibrationMetrics.negative_log_likelihood(logits_tensor, labels)
     accuracy = (predictions == labels).float().mean().item()
 

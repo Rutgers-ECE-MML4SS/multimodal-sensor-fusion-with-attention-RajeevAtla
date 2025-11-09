@@ -15,7 +15,12 @@ from typing import Any, cast
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from encoders import SequenceEncoder, FrameEncoder, SimpleMLPEncoder, build_encoder
+from encoders import (
+    SequenceEncoder,
+    FrameEncoder,
+    SimpleMLPEncoder,
+    build_encoder,
+)
 
 
 class TestSequenceEncoder:
@@ -23,7 +28,12 @@ class TestSequenceEncoder:
 
     @pytest.fixture
     def encoder_params(self):
-        return {"input_dim": 64, "hidden_dim": 128, "output_dim": 64, "num_layers": 2}
+        return {
+            "input_dim": 64,
+            "hidden_dim": 128,
+            "output_dim": 64,
+            "num_layers": 2,
+        }
 
     @pytest.fixture
     def sequence_data(self):
@@ -113,7 +123,9 @@ class TestSequenceEncoder:
             cast(Any, encoder).conv_net = None
             cast(Any, encoder).pool = None
 
-            with pytest.raises(RuntimeError, match="CNN modules not initialized"):
+            with pytest.raises(
+                RuntimeError, match="CNN modules not initialized"
+            ):
                 encoder(sequence_data)
         except NotImplementedError:
             pytest.skip("CNN SequenceEncoder not implemented yet")
@@ -149,7 +161,9 @@ class TestSequenceEncoder:
 
             batch_size = 2
             seq_len = 100
-            sequence = torch.randn(batch_size, seq_len, encoder_params["input_dim"])
+            sequence = torch.randn(
+                batch_size, seq_len, encoder_params["input_dim"]
+            )
             lengths = torch.tensor([80, 60])  # Different actual lengths
 
             output = encoder(sequence, lengths)
@@ -179,7 +193,9 @@ class TestSequenceEncoder:
                     super().__init__()
 
                 def forward(
-                    self, x: torch.Tensor, src_key_padding_mask: torch.Tensor | None = None
+                    self,
+                    x: torch.Tensor,
+                    src_key_padding_mask: torch.Tensor | None = None,
                 ) -> torch.Tensor:
                     captured_masks.clear()
                     captured_masks.append(src_key_padding_mask)
@@ -205,7 +221,10 @@ class TestSequenceEncoder:
             last_mask = captured_masks[0]
             assert last_mask is not None
             expected_mask = torch.tensor(
-                [[False, False, False, True, True], [False, False, False, False, False]]
+                [
+                    [False, False, False, True, True],
+                    [False, False, False, False, False],
+                ]
             )
             assert last_mask.shape == expected_mask.shape
             assert torch.equal(last_mask, expected_mask)
@@ -217,9 +236,9 @@ class TestSequenceEncoder:
                 .expand_as(sequence)
             )
             transformer_out = sequence + time_offsets
-            expected = (transformer_out * expected_valid).sum(dim=1) / expected_valid.sum(
+            expected = (transformer_out * expected_valid).sum(
                 dim=1
-            ).clamp_min(1.0)
+            ) / expected_valid.sum(dim=1).clamp_min(1.0)
 
             torch.testing.assert_close(output, expected)
         except NotImplementedError:
@@ -241,7 +260,9 @@ class TestSequenceEncoder:
 
             class ShiftTransformer(nn.Module):
                 def forward(
-                    self, x: torch.Tensor, src_key_padding_mask: torch.Tensor | None = None
+                    self,
+                    x: torch.Tensor,
+                    src_key_padding_mask: torch.Tensor | None = None,
                 ) -> torch.Tensor:
                     captured_masks.clear()
                     captured_masks.append(src_key_padding_mask)
@@ -277,7 +298,9 @@ class TestSequenceEncoder:
 
             sequence = torch.randn(2, 3, 4)
 
-            with pytest.raises(RuntimeError, match="Transformer modules not initialized."):
+            with pytest.raises(
+                RuntimeError, match="Transformer modules not initialized."
+            ):
                 encoder(sequence)
         except NotImplementedError:
             pytest.skip("Transformer SequenceEncoder not implemented yet")
@@ -316,7 +339,9 @@ class TestFrameEncoder:
     def test_attention_pooling(self, encoder_params, frame_data):
         """Test FrameEncoder with attention pooling."""
         try:
-            encoder = FrameEncoder(**encoder_params, temporal_pooling="attention")
+            encoder = FrameEncoder(
+                **encoder_params, temporal_pooling="attention"
+            )
             output = encoder(frame_data)
 
             batch_size = frame_data.size(0)
@@ -332,11 +357,15 @@ class TestFrameEncoder:
     def test_with_mask(self, encoder_params):
         """Test FrameEncoder with variable-length videos."""
         try:
-            encoder = FrameEncoder(**encoder_params, temporal_pooling="attention")
+            encoder = FrameEncoder(
+                **encoder_params, temporal_pooling="attention"
+            )
 
             batch_size = 2
             num_frames = 30
-            frames = torch.randn(batch_size, num_frames, encoder_params["frame_dim"])
+            frames = torch.randn(
+                batch_size, num_frames, encoder_params["frame_dim"]
+            )
             mask = torch.zeros(batch_size, num_frames)
             mask[0, :20] = 1  # First video has 20 frames
             mask[1, :15] = 1  # Second video has 15 frames
@@ -344,7 +373,9 @@ class TestFrameEncoder:
             output = encoder(frames, mask)
 
             assert output.shape == (batch_size, encoder_params["output_dim"])
-            assert not torch.isnan(output).any(), "Output contains NaN with mask"
+            assert not torch.isnan(output).any(), (
+                "Output contains NaN with mask"
+            )
             print("✓ FrameEncoder mask test passed")
         except NotImplementedError:
             pytest.skip("FrameEncoder mask handling not implemented yet")
@@ -364,7 +395,9 @@ class TestFrameEncoder:
         """Average pooling branch should handle masks."""
         encoder = FrameEncoder(**encoder_params, temporal_pooling="average")
         frames = torch.randn(2, 5, encoder_params["frame_dim"])
-        mask = torch.tensor([[1, 1, 0, 0, 0], [1, 1, 1, 1, 1]], dtype=torch.float32)
+        mask = torch.tensor(
+            [[1, 1, 0, 0, 0], [1, 1, 1, 1, 1]], dtype=torch.float32
+        )
         output = encoder(frames, mask)
         assert output.shape == (2, encoder_params["output_dim"])
 
@@ -393,8 +426,12 @@ class TestFrameEncoder:
     def test_attention_pool_requires_layer(self, encoder_params):
         """Calling attention pool without attention layer should raise."""
         encoder = FrameEncoder(**encoder_params, temporal_pooling="average")
-        with pytest.raises(RuntimeError, match="Attention layer not initialized"):
-            encoder.attention_pool(torch.randn(2, 3, encoder_params["hidden_dim"]))
+        with pytest.raises(
+            RuntimeError, match="Attention layer not initialized"
+        ):
+            encoder.attention_pool(
+                torch.randn(2, 3, encoder_params["hidden_dim"])
+            )
 
 
 class TestSimpleMLPEncoder:
@@ -402,7 +439,12 @@ class TestSimpleMLPEncoder:
 
     @pytest.fixture
     def encoder_params(self):
-        return {"input_dim": 256, "hidden_dim": 128, "output_dim": 64, "num_layers": 2}
+        return {
+            "input_dim": 256,
+            "hidden_dim": 128,
+            "output_dim": 64,
+            "num_layers": 2,
+        }
 
     def test_output_shape(self, encoder_params):
         """Test SimpleMLPEncoder output shape."""
@@ -426,13 +468,17 @@ class TestSimpleMLPEncoder:
         try:
             encoder = SimpleMLPEncoder(**encoder_params)
 
-            features = torch.randn(2, encoder_params["input_dim"], requires_grad=True)
+            features = torch.randn(
+                2, encoder_params["input_dim"], requires_grad=True
+            )
             output = encoder(features)
             loss = output.sum()
             loss.backward()
 
             assert features.grad is not None, "No gradient for input features"
-            has_param_grad = any(p.grad is not None for p in encoder.parameters())
+            has_param_grad = any(
+                p.grad is not None for p in encoder.parameters()
+            )
             assert has_param_grad, "No gradients in model parameters"
             print("✓ SimpleMLPEncoder gradient flow test passed")
         except NotImplementedError:
@@ -451,7 +497,9 @@ class TestEncoderFactory:
     def test_video_encoder(self):
         """Test factory creates correct encoder for video."""
         try:
-            encoder = build_encoder(modality="video", input_dim=512, output_dim=128)
+            encoder = build_encoder(
+                modality="video", input_dim=512, output_dim=128
+            )
             assert encoder is not None
             # Should be FrameEncoder
             print("✓ Video encoder factory test passed")
@@ -460,13 +508,17 @@ class TestEncoderFactory:
 
     def test_unknown_modality_uses_mlp(self):
         """Fallback should use SimpleMLPEncoder for unknown modalities."""
-        encoder = build_encoder(modality="metadata", input_dim=32, output_dim=16)
+        encoder = build_encoder(
+            modality="metadata", input_dim=32, output_dim=16
+        )
         assert isinstance(encoder, SimpleMLPEncoder)
 
     def test_imu_encoder(self):
         """Test factory creates correct encoder for IMU."""
         try:
-            encoder = build_encoder(modality="imu", input_dim=64, output_dim=128)
+            encoder = build_encoder(
+                modality="imu", input_dim=64, output_dim=128
+            )
             assert encoder is not None
             # Should be SequenceEncoder
             print("✓ IMU encoder factory test passed")
@@ -487,7 +539,11 @@ def test_encoders_main_handles_errors(monkeypatch, capsys):
 
     def execute_main() -> str:
         lines = Path("src/encoders.py").read_text().splitlines()
-        start = next(idx for idx, line in enumerate(lines) if line.startswith("if __name__"))
+        start = next(
+            idx
+            for idx, line in enumerate(lines)
+            if line.startswith("if __name__")
+        )
         block = "\n" * start + "\n".join(lines[start:])
         namespace = dict(enc_module.__dict__)
         namespace["__name__"] = "__main__"
@@ -505,30 +561,54 @@ def test_encoders_main_handles_errors(monkeypatch, capsys):
     def raise_notimpl(*_args, **_kwargs):
         raise NotImplementedError("stub")
 
-    monkeypatch.setattr(enc_module.SequenceEncoder, "__init__", raise_notimpl, raising=False)
-    monkeypatch.setattr(enc_module.FrameEncoder, "__init__", raise_notimpl, raising=False)
-    monkeypatch.setattr(enc_module.SimpleMLPEncoder, "__init__", raise_notimpl, raising=False)
+    monkeypatch.setattr(
+        enc_module.SequenceEncoder, "__init__", raise_notimpl, raising=False
+    )
+    monkeypatch.setattr(
+        enc_module.FrameEncoder, "__init__", raise_notimpl, raising=False
+    )
+    monkeypatch.setattr(
+        enc_module.SimpleMLPEncoder, "__init__", raise_notimpl, raising=False
+    )
     output = execute_main()
     assert output.count("not implemented yet") >= 3
 
-    monkeypatch.setattr(enc_module.SequenceEncoder, "__init__", seq_init, raising=False)
-    monkeypatch.setattr(enc_module.FrameEncoder, "__init__", frame_init, raising=False)
-    monkeypatch.setattr(enc_module.SimpleMLPEncoder, "__init__", mlp_init, raising=False)
+    monkeypatch.setattr(
+        enc_module.SequenceEncoder, "__init__", seq_init, raising=False
+    )
+    monkeypatch.setattr(
+        enc_module.FrameEncoder, "__init__", frame_init, raising=False
+    )
+    monkeypatch.setattr(
+        enc_module.SimpleMLPEncoder, "__init__", mlp_init, raising=False
+    )
 
     def raise_runtime(*_args, **_kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(enc_module.SequenceEncoder, "forward", raise_runtime, raising=False)
-    monkeypatch.setattr(enc_module.FrameEncoder, "forward", raise_runtime, raising=False)
-    monkeypatch.setattr(enc_module.SimpleMLPEncoder, "forward", raise_runtime, raising=False)
+    monkeypatch.setattr(
+        enc_module.SequenceEncoder, "forward", raise_runtime, raising=False
+    )
+    monkeypatch.setattr(
+        enc_module.FrameEncoder, "forward", raise_runtime, raising=False
+    )
+    monkeypatch.setattr(
+        enc_module.SimpleMLPEncoder, "forward", raise_runtime, raising=False
+    )
     output = execute_main()
     assert "encoder error" in output
     assert "frameencoder error" in output
     assert "simplemlpencoder error" in output
 
-    monkeypatch.setattr(enc_module.SequenceEncoder, "forward", seq_forward, raising=False)
-    monkeypatch.setattr(enc_module.FrameEncoder, "forward", frame_forward, raising=False)
-    monkeypatch.setattr(enc_module.SimpleMLPEncoder, "forward", mlp_forward, raising=False)
+    monkeypatch.setattr(
+        enc_module.SequenceEncoder, "forward", seq_forward, raising=False
+    )
+    monkeypatch.setattr(
+        enc_module.FrameEncoder, "forward", frame_forward, raising=False
+    )
+    monkeypatch.setattr(
+        enc_module.SimpleMLPEncoder, "forward", mlp_forward, raising=False
+    )
 
 
 if __name__ == "__main__":

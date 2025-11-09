@@ -105,9 +105,15 @@ class CrossModalAttention(nn.Module):
         k = self.key_proj(key)  # (batch, k_len, hidden_dim)
         v = self.value_proj(value)  # (batch, k_len, hidden_dim)
 
-        q = q.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(batch_size, k_len, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(batch_size, k_len, self.num_heads, self.head_dim).transpose(1, 2)
+        q = q.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(
+            1, 2
+        )
+        k = k.view(batch_size, k_len, self.num_heads, self.head_dim).transpose(
+            1, 2
+        )
+        v = v.view(batch_size, k_len, self.num_heads, self.head_dim).transpose(
+            1, 2
+        )
 
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
 
@@ -118,10 +124,14 @@ class CrossModalAttention(nn.Module):
             attn_scores = attn_scores.masked_fill(mask == 0, float("-inf"))
 
         attn_weights = torch.softmax(attn_scores, dim=-1)
-        attn_weights = torch.nan_to_num(attn_weights, nan=0.0, posinf=0.0, neginf=0.0)
+        attn_weights = torch.nan_to_num(
+            attn_weights, nan=0.0, posinf=0.0, neginf=0.0
+        )
         attn_weights = self.dropout(attn_weights)
 
-        attended = torch.matmul(attn_weights, v)  # (batch, num_heads, q_len, head_dim)
+        attended = torch.matmul(
+            attn_weights, v
+        )  # (batch, num_heads, q_len, head_dim)
         attended = (
             attended.transpose(1, 2)
             .contiguous()
@@ -203,9 +213,15 @@ class TemporalAttention(nn.Module):
         k = self.key_proj(sequence)
         v = self.value_proj(sequence)
 
-        q = q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        q = q.view(
+            batch_size, seq_len, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        k = k.view(
+            batch_size, seq_len, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        v = v.view(
+            batch_size, seq_len, self.num_heads, self.head_dim
+        ).transpose(1, 2)
 
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
 
@@ -216,7 +232,9 @@ class TemporalAttention(nn.Module):
             attn_scores = attn_scores.masked_fill(mask == 0, float("-inf"))
 
         attn_weights = torch.softmax(attn_scores, dim=-1)
-        attn_weights = torch.nan_to_num(attn_weights, nan=0.0, posinf=0.0, neginf=0.0)
+        attn_weights = torch.nan_to_num(
+            attn_weights, nan=0.0, posinf=0.0, neginf=0.0
+        )
         attn_weights = self.dropout(attn_weights)
 
         attended = torch.matmul(attn_weights, v)
@@ -251,7 +269,9 @@ class TemporalAttention(nn.Module):
             )
 
         # Average across heads and query positions to obtain a distribution over timesteps
-        mean_weights = attention_weights.mean(dim=1)  # (batch, seq_len, seq_len)
+        mean_weights = attention_weights.mean(
+            dim=1
+        )  # (batch, seq_len, seq_len)
         pooling_weights = mean_weights.mean(dim=1)  # (batch, seq_len)
         pooling_weights = pooling_weights / (
             pooling_weights.sum(dim=1, keepdim=True) + 1e-8
@@ -312,12 +332,14 @@ class PairwiseModalityAttention(nn.Module):
             for key_mod in self.modality_names:
                 if query_mod == key_mod:
                     continue
-                attention_layers[f"{query_mod}_to_{key_mod}"] = CrossModalAttention(
-                    query_dim=hidden_dim,
-                    key_dim=hidden_dim,
-                    hidden_dim=hidden_dim,
-                    num_heads=num_heads,
-                    dropout=dropout,
+                attention_layers[f"{query_mod}_to_{key_mod}"] = (
+                    CrossModalAttention(
+                        query_dim=hidden_dim,
+                        key_dim=hidden_dim,
+                        hidden_dim=hidden_dim,
+                        num_heads=num_heads,
+                        dropout=dropout,
+                    )
                 )
         self.attention_layers = nn.ModuleDict(attention_layers)
 
@@ -339,7 +361,9 @@ class PairwiseModalityAttention(nn.Module):
             attention_maps: Dict of {f"{mod_a}_to_{mod_b}": attention_weights}
         """
         if not self.modality_names:
-            raise ValueError("No modalities provided for PairwiseModalityAttention.")
+            raise ValueError(
+                "No modalities provided for PairwiseModalityAttention."
+            )
 
         reference_modality = self.modality_names[0]
         batch_size = modality_features[reference_modality].size(0)
@@ -354,7 +378,9 @@ class PairwiseModalityAttention(nn.Module):
             modality_mask = modality_mask.to(device=device, dtype=dtype)
 
         projected = {
-            modality: self.projections[modality](modality_features[modality].to(device))
+            modality: self.projections[modality](
+                modality_features[modality].to(device)
+            )
             for modality in self.modality_names
         }
 
@@ -374,7 +400,9 @@ class PairwiseModalityAttention(nn.Module):
 
                 key_index = self.modality_names.index(key_mod)
                 key_mask = (
-                    modality_mask[:, key_index] if modality_mask is not None else None
+                    modality_mask[:, key_index]
+                    if modality_mask is not None
+                    else None
                 )
 
                 attended, weights = self.attention_layers[attention_key](
@@ -389,7 +417,9 @@ class PairwiseModalityAttention(nn.Module):
         attended_features = {}
         for idx, modality in enumerate(self.modality_names):
             stacked = torch.stack(aggregated[modality], dim=0).mean(dim=0)
-            attended_features[modality] = stacked * modality_mask[:, idx].unsqueeze(-1)
+            attended_features[modality] = stacked * modality_mask[
+                :, idx
+            ].unsqueeze(-1)
 
         return attended_features, attention_maps
 
@@ -496,7 +526,9 @@ if __name__ == "__main__":
         attended_seq, weights = temporal_attn(sequence)
 
         assert attended_seq.shape == (batch_size, seq_len, hidden_dim)
-        print(f"✓ TemporalAttention working! Output shape: {attended_seq.shape}")
+        print(
+            f"✓ TemporalAttention working! Output shape: {attended_seq.shape}"
+        )
 
     except NotImplementedError:
         print("✗ TemporalAttention not implemented yet")

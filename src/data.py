@@ -9,9 +9,7 @@ Provides generic dataset loaders with:
 
 from __future__ import annotations
 
-import bisect
 from collections import OrderedDict
-from itertools import accumulate
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
@@ -91,7 +89,9 @@ class MultimodalDataset(data.Dataset):
             if modality_file.exists():
                 data[modality] = np.load(modality_file)
             else:
-                raise FileNotFoundError(f"Modality file not found: {modality_file}")
+                raise FileNotFoundError(
+                    f"Modality file not found: {modality_file}"
+                )
 
         labels_file = split_dir / "labels.npy"
         if labels_file.exists():
@@ -105,7 +105,11 @@ class MultimodalDataset(data.Dataset):
         """Initialise dataset backed by sharded tensor manifests."""
 
         entries = []
-        project_root = manifest_path.parents[2] if len(manifest_path.parents) >= 3 else Path(".")
+        project_root = (
+            manifest_path.parents[2]
+            if len(manifest_path.parents) >= 3
+            else Path(".")
+        )
         with manifest_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
@@ -162,7 +166,9 @@ class MultimodalDataset(data.Dataset):
         else:
             self.max_shard_cache = max(1, self.max_shard_cache)
 
-    def _resolve_modality_columns(self, columns: List[str]) -> Dict[str, List[str]]:
+    def _resolve_modality_columns(
+        self, columns: List[str]
+    ) -> Dict[str, List[str]]:
         """Map requested modalities to the appropriate CSV column subsets."""
 
         column_set = set(columns)
@@ -180,7 +186,9 @@ class MultimodalDataset(data.Dataset):
                 if prefix.endswith("_imu"):
                     prefix = prefix.rsplit("_imu", 1)[0]
                 prefix = prefix.replace(" ", "")
-                candidate = [col for col in columns if col.startswith(f"{prefix}_")]
+                candidate = [
+                    col for col in columns if col.startswith(f"{prefix}_")
+                ]
 
             if not candidate:
                 raise ValueError(
@@ -217,7 +225,10 @@ class MultimodalDataset(data.Dataset):
 
         payload = torch.load(path)
         self._shard_cache[key] = payload
-        if not self.prefetch_shards and len(self._shard_cache) > self.max_shard_cache:
+        if (
+            not self.prefetch_shards
+            and len(self._shard_cache) > self.max_shard_cache
+        ):
             self._shard_cache.popitem(last=False)
         return payload
 
@@ -269,7 +280,9 @@ class MultimodalDataset(data.Dataset):
 
         # Apply modality dropout during training
         if self.modality_dropout > 0:
-            dropout_mask = torch.rand(len(self.modalities)) > self.modality_dropout
+            dropout_mask = (
+                torch.rand(len(self.modalities)) > self.modality_dropout
+            )
             if self.use_manifest:
                 mask = mask * dropout_mask.unsqueeze(0)
             else:
@@ -416,19 +429,25 @@ def create_dataloaders(
         train_dataset = SyntheticMultimodalDataset(
             num_samples=kwargs.get("num_samples", 10000),
             num_classes=kwargs.get("num_classes", 5),
-            modality_dims={m: kwargs.get("modality_dim", 32) for m in modalities},
+            modality_dims={
+                m: kwargs.get("modality_dim", 32) for m in modalities
+            },
             split="train",
         )
         val_dataset = SyntheticMultimodalDataset(
             num_samples=kwargs.get("num_samples", 2000) // 5,
             num_classes=kwargs.get("num_classes", 5),
-            modality_dims={m: kwargs.get("modality_dim", 32) for m in modalities},
+            modality_dims={
+                m: kwargs.get("modality_dim", 32) for m in modalities
+            },
             split="val",
         )
         test_dataset = SyntheticMultimodalDataset(
             num_samples=kwargs.get("num_samples", 2000) // 5,
             num_classes=kwargs.get("num_classes", 5),
-            modality_dims={m: kwargs.get("modality_dim", 32) for m in modalities},
+            modality_dims={
+                m: kwargs.get("modality_dim", 32) for m in modalities
+            },
             split="test",
         )
     else:
@@ -550,7 +569,9 @@ if __name__ == "__main__":
 
     # Test batch
     batch_features, batch_labels, batch_masks = next(iter(train_loader))
-    print(f"\nBatch features shapes: {[f.shape for f in batch_features.values()]}")
+    print(
+        f"\nBatch features shapes: {[f.shape for f in batch_features.values()]}"
+    )
     print(f"Batch labels shape: {batch_labels.shape}")
     print(f"Batch masks shape: {batch_masks.shape}")
 

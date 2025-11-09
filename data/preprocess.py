@@ -57,9 +57,9 @@ DATA_COLUMNS: List[str] = ["timestamp_s", "activity_id", "heart_rate_bpm"]
 for sensor in IMU_SENSORS:
     DATA_COLUMNS.extend(_sensor_columns(sensor))
 
-assert (
-    len(DATA_COLUMNS) == 54
-), f"Expected 54 raw columns, found {len(DATA_COLUMNS)} definitions."
+assert len(DATA_COLUMNS) == 54, (
+    f"Expected 54 raw columns, found {len(DATA_COLUMNS)} definitions."
+)
 
 
 def _discover_raw_files(raw_dir: Path) -> List[Path]:
@@ -139,14 +139,18 @@ def _save_tensor_shard(group: pl.DataFrame, tensor_path: Path) -> None:
     torch.save(payload, tensor_path)
 
 
-def _materialize_shards(df: pl.DataFrame, csv_dir: Path, tensor_dir: Path) -> List[dict]:
+def _materialize_shards(
+    df: pl.DataFrame, csv_dir: Path, tensor_dir: Path
+) -> List[dict]:
     """Write CSV and tensor shards; return metadata."""
 
     csv_dir.mkdir(parents=True, exist_ok=True)
     tensor_dir.mkdir(parents=True, exist_ok=True)
 
     metadata: List[dict] = []
-    for (subject, activity), group in df.group_by(["subject_id", "activity_id"]):
+    for (subject, activity), group in df.group_by(
+        ["subject_id", "activity_id"]
+    ):
         csv_subject_dir = csv_dir / f"subject_{subject}"
         csv_subject_dir.mkdir(parents=True, exist_ok=True)
         csv_path = csv_subject_dir / f"activity_{activity}.csv"
@@ -176,7 +180,11 @@ def _stratified_split(shards: List[dict]) -> dict:
 
     random.seed(42)
     splits = {"train": [], "val": [], "test": []}
-    targets = {"train": TRAIN_FRACTION, "val": VAL_FRACTION, "test": TEST_FRACTION}
+    targets = {
+        "train": TRAIN_FRACTION,
+        "val": VAL_FRACTION,
+        "test": TEST_FRACTION,
+    }
     shards_by_activity: dict[str, List[dict]] = {}
     for shard in shards:
         shards_by_activity.setdefault(str(shard["activity"]), []).append(shard)
@@ -188,8 +196,10 @@ def _stratified_split(shards: List[dict]) -> dict:
             split = max(quotas, key=quotas.get)
             splits[split].append(shard)
             quotas[split] -= shard["rows"]
+
     def totals() -> dict:
         return {k: sum(s["rows"] for s in splits[k]) for k in splits}
+
     grand_total = sum(s["rows"] for s in shards)
     desired = {
         "train": TRAIN_FRACTION * grand_total,
@@ -198,12 +208,8 @@ def _stratified_split(shards: List[dict]) -> dict:
     }
     for _ in range(1000):
         current = totals()
-        over_split = max(
-            splits, key=lambda k: current[k] - desired[k]
-        )
-        under_split = min(
-            splits, key=lambda k: current[k] - desired[k]
-        )
+        over_split = max(splits, key=lambda k: current[k] - desired[k])
+        under_split = min(splits, key=lambda k: current[k] - desired[k])
         over_amount = current[over_split] - desired[over_split]
         under_amount = desired[under_split] - current[under_split]
         if over_amount <= 0 and under_amount <= 0:
@@ -211,13 +217,17 @@ def _stratified_split(shards: List[dict]) -> dict:
         donor_candidates = splits[over_split]
         if not donor_candidates:
             break
-        donor = min(donor_candidates, key=lambda s: abs(s["rows"] - under_amount))
+        donor = min(
+            donor_candidates, key=lambda s: abs(s["rows"] - under_amount)
+        )
         splits[over_split].remove(donor)
         splits[under_split].append(donor)
     for split in splits:
         if not splits[split]:
             # move smallest shard from largest split
-            largest = max(splits, key=lambda k: sum(s["rows"] for s in splits[k]))
+            largest = max(
+                splits, key=lambda k: sum(s["rows"] for s in splits[k])
+            )
             donor = min(splits[largest], key=lambda s: s["rows"])
             splits[largest].remove(donor)
             splits[split].append(donor)

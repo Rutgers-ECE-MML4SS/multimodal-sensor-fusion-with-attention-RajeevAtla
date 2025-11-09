@@ -98,7 +98,9 @@ def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
         return metrics
 
 
-def evaluate_missing_modalities(model, dataloader, modality_names, device="cpu"):
+def evaluate_missing_modalities(
+    model, dataloader, modality_names, device="cpu"
+):
     """
     Test model robustness to missing modalities.
 
@@ -117,7 +119,11 @@ def evaluate_missing_modalities(model, dataloader, modality_names, device="cpu")
     model.to(device)
 
     num_modalities = len(modality_names)
-    results = {"full_modalities": {}, "single_modalities": {}, "all_combinations": {}}
+    results = {
+        "full_modalities": {},
+        "single_modalities": {},
+        "all_combinations": {},
+    }
 
     # Test all combinations
     print("\nTesting missing modality robustness...")
@@ -227,7 +233,9 @@ def _compute_modality_importance(results, modality_names):
                 without_scores.append(metrics["accuracy"])
 
         if with_scores and without_scores:
-            importance[modality] = np.mean(with_scores) - np.mean(without_scores)
+            importance[modality] = np.mean(with_scores) - np.mean(
+                without_scores
+            )
         else:
             importance[modality] = 0.0
 
@@ -251,12 +259,17 @@ def save_results_json(results, output_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate multimodal fusion model")
+    parser = argparse.ArgumentParser(
+        description="Evaluate multimodal fusion model"
+    )
     parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to model checkpoint"
     )
     parser.add_argument(
-        "--config", type=str, default="config/base.yaml", help="Path to config file"
+        "--config",
+        type=str,
+        default="config/base.yaml",
+        help="Path to config file",
     )
     parser.add_argument(
         "--output_dir",
@@ -269,7 +282,9 @@ def main():
         action="store_true",
         help="Run missing modality robustness test",
     )
-    parser.add_argument("--device", type=str, default="cpu", help="Device to run on")
+    parser.add_argument(
+        "--device", type=str, default="cpu", help="Device to run on"
+    )
 
     args = parser.parse_args()
 
@@ -307,7 +322,9 @@ def main():
 
     # Calibration metrics
     print("\nComputing calibration metrics...")
-    ece = CalibrationMetrics.expected_calibration_error(confidences, preds, labels)
+    ece = CalibrationMetrics.expected_calibration_error(
+        confidences, preds, labels
+    )
     print(f"ECE: {ece:.4f}")
 
     # Save standard results

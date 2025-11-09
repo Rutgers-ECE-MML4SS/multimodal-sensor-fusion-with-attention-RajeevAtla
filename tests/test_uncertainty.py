@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 
 import pytest
 import torch
@@ -96,7 +96,9 @@ def test_uncertainty_weighted_fusion_handles_fallback():
 
     # Fallback branch when no modalities available
     zero_mask = torch.zeros_like(mask)
-    fused, weights = fusion(modality_predictions, modality_uncertainties, zero_mask)
+    fused, weights = fusion(
+        modality_predictions, modality_uncertainties, zero_mask
+    )
     assert torch.allclose(weights, torch.full_like(weights, 0.5))
 
 
@@ -119,7 +121,9 @@ def test_temperature_scaling_device_mismatch(monkeypatch):
     class FakeCudaTensor(torch.Tensor):
         @staticmethod
         def __new__(cls, tensor):
-            return torch.Tensor._make_subclass(cls, tensor, tensor.requires_grad)
+            return torch.Tensor._make_subclass(
+                cls, tensor, tensor.requires_grad
+            )
 
         @property
         def device(self):
@@ -202,7 +206,9 @@ def test_uncertainty_weighted_fusion_errors():
 
 def test_uncertainty_main_generates_outputs(capsys, tmp_path):
     output_path = tmp_path / "cli_reliability.png"
-    results = uncertainty.main(save_path=output_path, num_samples=32, num_classes=4)
+    results = uncertainty.main(
+        save_path=output_path, num_samples=32, num_classes=4
+    )
     captured = capsys.readouterr().out
     assert "Testing calibration metrics..." in captured
     assert "Reliability diagram created" in captured
@@ -212,7 +218,9 @@ def test_uncertainty_main_generates_outputs(capsys, tmp_path):
     assert isinstance(results["ece"], float)
 
 
-def test_uncertainty_main_handles_not_implemented(monkeypatch, capsys, tmp_path):
+def test_uncertainty_main_handles_not_implemented(
+    monkeypatch, capsys, tmp_path
+):
     def raise_ece(*args, **kwargs):
         raise NotImplementedError("ece unavailable")
 
@@ -230,7 +238,9 @@ def test_uncertainty_main_handles_not_implemented(monkeypatch, capsys, tmp_path)
         staticmethod(raise_reliability),
     )
 
-    results = uncertainty.main(save_path=tmp_path / "unused.png", num_samples=8, num_classes=2)
+    results = uncertainty.main(
+        save_path=tmp_path / "unused.png", num_samples=8, num_classes=2
+    )
     captured = capsys.readouterr().out
     assert "ECE not implemented yet" in captured
     assert "Reliability diagram not implemented yet" in captured

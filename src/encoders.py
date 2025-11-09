@@ -100,7 +100,10 @@ class SequenceEncoder(nn.Module):
             cast_self.input_projection = nn.Linear(input_dim, hidden_dim)
             nhead = 4 if hidden_dim % 4 == 0 else 1
             encoder_layer = nn.TransformerEncoderLayer(
-                d_model=hidden_dim, nhead=nhead, dropout=dropout, batch_first=True
+                d_model=hidden_dim,
+                nhead=nhead,
+                dropout=dropout,
+                batch_first=True,
             )
             cast_self.transformer = nn.TransformerEncoder(
                 encoder_layer, num_layers=num_layers
@@ -123,7 +126,9 @@ class SequenceEncoder(nn.Module):
             encoding: (batch_size, output_dim) - fixed-size embedding
         """
         if sequence.dim() != 3:
-            raise ValueError(f"Expected 3D input sequence, got shape {sequence.shape}")
+            raise ValueError(
+                f"Expected 3D input sequence, got shape {sequence.shape}"
+            )
 
         batch_size, seq_len, _ = sequence.shape
 
@@ -135,9 +140,14 @@ class SequenceEncoder(nn.Module):
 
             if enforce_lengths:
                 assert lengths is not None
-                lengths_cpu = lengths.to(device=sequence.device).to(torch.int64).cpu()
+                lengths_cpu = (
+                    lengths.to(device=sequence.device).to(torch.int64).cpu()
+                )
                 packed = nn.utils.rnn.pack_padded_sequence(
-                    rnn_input, lengths_cpu, batch_first=True, enforce_sorted=False
+                    rnn_input,
+                    lengths_cpu,
+                    batch_first=True,
+                    enforce_sorted=False,
                 )
                 outputs, hidden = self.rnn(packed)
                 outputs, _ = nn.utils.rnn.pad_packed_sequence(
@@ -186,7 +196,9 @@ class SequenceEncoder(nn.Module):
             if src_key_padding_mask is not None:
                 valid_mask = (~src_key_padding_mask).unsqueeze(-1).float()
                 pooled = transformer_output * valid_mask
-                pooled = pooled.sum(dim=1) / (valid_mask.sum(dim=1).clamp_min(1.0))
+                pooled = pooled.sum(dim=1) / (
+                    valid_mask.sum(dim=1).clamp_min(1.0)
+                )
             else:
                 pooled = transformer_output.mean(dim=1)
 
@@ -261,7 +273,9 @@ class FrameEncoder(nn.Module):
             encoding: (batch_size, output_dim) - video-level embedding
         """
         if frames.dim() != 3:
-            raise ValueError(f"Expected 3D frame tensor, got shape {frames.shape}")
+            raise ValueError(
+                f"Expected 3D frame tensor, got shape {frames.shape}"
+            )
 
         processed = self.frame_processor(frames)
         device = processed.device
@@ -289,7 +303,9 @@ class FrameEncoder(nn.Module):
                 pooled, _ = masked_frames.max(dim=1)
                 pooled = torch.nan_to_num(pooled, nan=0.0, neginf=0.0)
         else:
-            raise ValueError(f"Unknown pooling strategy: {self.temporal_pooling}")
+            raise ValueError(
+                f"Unknown pooling strategy: {self.temporal_pooling}"
+            )
 
         encoding = self.projection(pooled)
         return encoding
@@ -375,7 +391,9 @@ class SimpleMLPEncoder(nn.Module):
             encoding: (batch_size, output_dim) - encoded features
         """
         if features.dim() != 2:
-            raise ValueError(f"Expected 2D feature tensor, got shape {features.shape}")
+            raise ValueError(
+                f"Expected 2D feature tensor, got shape {features.shape}"
+            )
         return self.encoder(features)
 
 
@@ -418,9 +436,12 @@ def build_encoder(
             return FrameEncoder(
                 frame_dim=input_dim, output_dim=output_dim, **config
             )
-        if modality_key in ["imu", "audio", "mocap", "accelerometer"] or modality_key.startswith(
-            "imu_"
-        ):
+        if modality_key in [
+            "imu",
+            "audio",
+            "mocap",
+            "accelerometer",
+        ] or modality_key.startswith("imu_"):
             return SequenceEncoder(
                 input_dim=input_dim, output_dim=output_dim, **config
             )
@@ -444,7 +465,9 @@ if __name__ == "__main__":
     for enc_type in ["lstm", "gru", "cnn"]:
         try:
             encoder = SequenceEncoder(
-                input_dim=input_dim, output_dim=output_dim, encoder_type=enc_type
+                input_dim=input_dim,
+                output_dim=output_dim,
+                encoder_type=enc_type,
             )
 
             sequence = torch.randn(batch_size, seq_len, input_dim)
@@ -465,7 +488,9 @@ if __name__ == "__main__":
         frame_dim = 512
 
         encoder = FrameEncoder(
-            frame_dim=frame_dim, output_dim=output_dim, temporal_pooling="attention"
+            frame_dim=frame_dim,
+            output_dim=output_dim,
+            temporal_pooling="attention",
         )
 
         frames = torch.randn(batch_size, num_frames, frame_dim)
