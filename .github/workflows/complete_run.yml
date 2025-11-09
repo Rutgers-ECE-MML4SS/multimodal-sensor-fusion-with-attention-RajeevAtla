@@ -28,8 +28,11 @@ jobs:
       - name: Sync dependencies - around 35s
         run: uv sync
         
-      - name: Run training - duration depends on hyperparams
+      - name: Run fusion sweep (early/late/hybrid, short runs)
         run: |
           export HYDRA_FULL_ERROR=1
-          uv run python src/train.py training.max_epochs=1
+          for fusion in early late hybrid; do
+            echo "Running ${fusion} fusion for 5 epochs"
+            uv run python src/train.py model.fusion_type=${fusion} training.max_epochs=5
+          done
           
