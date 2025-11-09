@@ -29,6 +29,47 @@ def _make_dataset_dir(
     return str(base)
 
 
+def _normalize_manifest_prefix(modality: str) -> str:
+    prefix = modality.lower()
+    if prefix.startswith("imu_"):
+        prefix = prefix.split("imu_", 1)[1]
+    if prefix.endswith("_imu"):
+        prefix = prefix.rsplit("_imu", 1)[0]
+    return prefix.replace(" ", "")
+
+
+def _make_manifest_dataset(
+    tmp_path: Path,
+    modalities: list[str],
+    rows_per_shard: int = 4,
+    shards_per_split: int = 2,
+) -> str:
+    base = tmp_path / "manifest_dataset"
+    splits_dir = base / "splits"
+    splits_dir.mkdir(parents=True, exist_ok=True)
+
+    columns = [
+        f"{_normalize_manifest_prefix(modality)}_{axis}"
+        for modality in modalities
+        for axis in ("x", "y")
+    ] + ["activity_id"]
+
+    for split in ["train", "val", "test"]:
+        entries: list[str] = []
+        for shard_idx in range(shards_per_split):
+            shard_path = tmp_path / f"{split}_shard{shard_idx}.pt"
+            tensor = torch.arange(
+                rows_per_shard * len(columns), dtype=torch.float32
+            ).reshape(rows_per_shard, len(columns))
+            tensor[:, -1] = float(shard_idx)
+            if split == "train" and shard_idx == 0:
+                tensor[0, 0] = float("nan")
+            torch.save({"data": tensor, "columns": columns}, shard_path)
+            entries.append(f"{shard_path},{rows_per_shard}")
+        (splits_dir / f"{split}.txt").write_text("\n".join(entries))
+    return str(base)
+
+
 def test_multimodal_dataset_loading_and_dropout(tmp_path, monkeypatch):
     modalities = ["mod1", "mod2"]
     root = _make_dataset_dir(tmp_path, modalities)
@@ -140,6 +181,56 @@ def test_create_dataloaders_synthetic_and_real(tmp_path, monkeypatch):
     assert train_features["mod1"].shape[0] == 3
     assert train_labels.shape == torch.Size([3])
     assert train_masks.shape == torch.Size([3, 2])
+
+
+def test_manifest_dataset_chunking_and_cache(tmp_path):
+    modalities = ["imu_left", "imu_right"]
+    root = _make_manifest_dataset(tmp_path, modalities, rows_per_shard=4)
+
+    dataset = data.MultimodalDataset(
+        data_dir=root,
+        modalities=modalities,
+        split="train",
+        chunk_size=2,
+        prefetch_shards=False,
+        max_shard_cache=1,
+    )
+
+    assert dataset.use_manifest
+    assert len(dataset) == 4  # 2 shards * (rows_per_shard / chunk_size)
+
+    features, label, mask = dataset[0]
+    assert label.shape == torch.Size([1])
+    assert torch.all(mask == 1)
+    assert all(feat.shape[0] == 1 for feat in features.values())
+    assert torch.all(torch.isfinite(features["imu_left"]))
+
+    dataset[3]
+    assert len(dataset._shard_cache) == 1  # cache evicted oldest shard
+
+
+def test_create_dataloaders_manifest_path(tmp_path):
+    modalities = ["imu_only"]
+    root = _make_manifest_dataset(tmp_path, modalities, rows_per_shard=2)
+
+    loaders = data.create_dataloaders(
+        dataset_name="pamap2",
+        data_dir=root,
+        modalities=modalities,
+        batch_size=4,
+        num_workers=0,
+        chunk_size=1,
+    )
+
+    train_loader, val_loader, test_loader = loaders
+    assert train_loader.batch_size == 1
+    assert val_loader.batch_size == 1
+    assert test_loader.batch_size == 1
+
+    features, labels, mask = next(iter(train_loader))
+    assert labels.shape == torch.Size([1])
+    assert mask.shape == torch.Size([1, len(modalities)])
+    assert set(features.keys()) == set(modalities)
 
 
 def test_simulate_missing_modalities():
