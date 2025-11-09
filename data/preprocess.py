@@ -135,12 +135,19 @@ def _save_tensor_shard(group: pl.DataFrame, tensor_path: Path, stats: dict) -> N
     columns = numeric_df.columns
     values = numeric_df.to_numpy().astype("float32", copy=True)
     for idx, column in enumerate(columns):
+        if column in {"timestamp_s", "activity_id"}:
+            continue
         column_stats = stats.get(column)
         if not column_stats:
             continue
         mean = column_stats["mean"]
         std = column_stats["std"] or 1.0
         values[:, idx] = (values[:, idx] - mean) / std
+    # ensure label and timestamp remain original (integers / seconds)
+    if "activity_id" in columns:
+        values[:, columns.index("activity_id")] = group["activity_id"].to_numpy()
+    if "timestamp_s" in columns:
+        values[:, columns.index("timestamp_s")] = group["timestamp_s"].to_numpy()
     payload = {
         "columns": columns,
         "data": torch.tensor(values, dtype=torch.float32),

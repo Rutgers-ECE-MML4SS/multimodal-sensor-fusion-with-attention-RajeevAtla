@@ -14,7 +14,7 @@ dataset:
   val_split: 0.15
   test_split: 0.15
   batch_size: 32  # Adjust for your RAM (16-64 typical for CPU)
-  num_workers: 4  # Parallel data loading (0-4 for CPU)
+  num_workers: 0  # Parallel data loading (0-4 for CPU)
   chunk_size: null  # None uses entire shard per batch; set int to split further
 
 # Model configuration
@@ -28,18 +28,25 @@ model:
   # Encoder configurations per modality
   encoders:
     imu_hand:
-      type: mlp
-      input_dim: 17  # temp + dual accel + gyro + mag + orientation
+      type: sequence
+      input_dim: 17
+      encoder_type: lstm
+      num_layers: 2
     imu_chest:
-      type: mlp
+      type: sequence
       input_dim: 17
+      encoder_type: lstm
+      num_layers: 2
     imu_ankle:
-      type: mlp
+      type: sequence
       input_dim: 17
+      encoder_type: lstm
+      num_layers: 2
     heart_rate:
-      type: mlp
+      type: sequence
       input_dim: 1
-      hidden_dim: 32
+      encoder_type: lstm
+      num_layers: 1
     video:
       type: frame  # frame, sequence, or mlp
       input_dim: 512  # ResNet features
@@ -60,6 +67,7 @@ training:
   warmup_epochs: 5
   gradient_clip_norm: 1.0
   early_stopping_patience: 10
+  label_smoothing: 0.05
   
   # Data augmentation
   augmentation:

@@ -13,6 +13,7 @@
 - Tensor shards: preprocessing now also emits `data/processed_tensors/subject_<id>/activity_<id>.pt` so the loader can keep each shard in memory and avoid repeated CSV parsing.
 - Loader: `src/data.py` now auto-detects the manifests, loads tensor shards (prefetching by default), slices modality-specific columns (e.g., `imu_hand → hand_*`, `heart_rate → heart_rate_bpm`), and falls back to the legacy `.npy` layout when manifests aren’t present.
 - Chunking: dataset loader chunks each shard into blocks (default 2 048 samples) so dataloader length drops from ~42k to a few hundred batches without skipping any data.
+- Sequence batches: Each manifest chunk is treated as a single `[batch=1, seq_len, feature_dim]` sample so all IMU/HR streams flow through the `SequenceEncoder` path; labels stay constant per shard (activity ID).
 
 ## formatting/linting/type checking
 - formatting and linting done with ruff

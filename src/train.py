@@ -75,7 +75,8 @@ class MultimodalFusionModule(pl.LightningModule):
         )
 
         # Loss function
-        self.criterion = nn.CrossEntropyLoss()
+        smoothing = config.training.get("label_smoothing", 0.0)
+        self.criterion = nn.CrossEntropyLoss(label_smoothing=smoothing)
 
         # Metrics storage
         cast_self.train_metrics = []

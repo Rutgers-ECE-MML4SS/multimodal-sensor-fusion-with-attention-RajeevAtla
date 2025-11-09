@@ -150,7 +150,7 @@ class MultimodalDataset(data.Dataset):
         self.use_manifest = True
         self._shard_paths: List[Path] = [e["path"] for e in entries]
         self._shard_rows: List[int] = [e["rows"] for e in entries]
-        self._total_rows: int = sum(self._shard_rows)
+        self._total_rows: int = len(self._shard_rows)
         self._shard_cache: OrderedDict[str, dict] = OrderedDict()
         self._chunks: List[Tuple[int, int, int]] = self._build_chunks()
 
@@ -241,11 +241,15 @@ class MultimodalDataset(data.Dataset):
             shard_idx, start, end = self._chunks[idx]
             payload = self._get_shard_data(shard_idx)
             batch = payload["data"][start:end]
-            features = {
-                modality: batch.index_select(1, index_tensor).clone().float()
-                for modality, index_tensor in self._modality_index_tensors.items()
-            }
-            label = batch[:, self._activity_col_index].long()
+            label_values = batch[:, self._activity_col_index]
+            label_value = label_values[0].item()
+            if not torch.all(label_values == label_values[0]):
+                raise ValueError("Activity id varies within shard chunk.")
+            features = {}
+            for modality, index_tensor in self._modality_index_tensors.items():
+                seq = batch.index_select(1, index_tensor).clone().float()
+                features[modality] = seq.unsqueeze(0)
+            label = torch.tensor([int(label_value)]).long()
         else:
             features = {}
             for modality in self.modalities:
