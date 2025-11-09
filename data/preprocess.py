@@ -18,10 +18,12 @@ from typing import Iterable, List, Sequence
 import polars as pl
 import torch
 
-RAW_SUBDIR = Path(__file__).parent / "raw"
-DEFAULT_OUTPUT = Path(__file__).parent / "processed"
-TENSOR_OUTPUT = Path(__file__).parent / "processed_tensors"
-SPLIT_DIR = Path(__file__).parent / "splits"
+DATA_DIR = Path(__file__).parent
+REPO_ROOT = DATA_DIR.parent
+RAW_SUBDIR = DATA_DIR / "raw"
+DEFAULT_OUTPUT = DATA_DIR / "processed"
+TENSOR_OUTPUT = DATA_DIR / "processed_tensors"
+SPLIT_DIR = DATA_DIR / "splits"
 TRAIN_FRACTION = 0.7
 VAL_FRACTION = 0.15
 TEST_FRACTION = 0.15
@@ -230,7 +232,8 @@ def _write_split_manifests(splits: dict) -> None:
         manifest_path = SPLIT_FILENAMES[name]
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         entries = sorted(
-            f"{s['tensor_path'].as_posix()},{s['rows']}" for s in shards
+            f"{s['tensor_path'].relative_to(REPO_ROOT).as_posix()},{s['rows']}"
+            for s in shards
         )
         manifest_path.write_text("\n".join(entries))
 

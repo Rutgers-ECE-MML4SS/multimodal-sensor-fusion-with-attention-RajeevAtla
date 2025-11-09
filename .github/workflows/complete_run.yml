@@ -8,14 +8,14 @@ on:
   pull_request:
 
 jobs:
-  lint-test:
+  run-full:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
+      - name: Check out repository - around 25s
         uses: actions/checkout@v4
 
-      - name: Set up uv (cold start, no caching)
+      - name: Set up uv (cold start, no caching) - around 2s
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
@@ -25,7 +25,7 @@ jobs:
           save-cache: "false"
           cache-python: "false"
           
-      - name: Sync dependencies
+      - name: Sync dependencies - around 35s
         run: uv sync
         
       - name: Run training
