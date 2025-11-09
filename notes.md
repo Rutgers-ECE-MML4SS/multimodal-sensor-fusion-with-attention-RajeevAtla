@@ -12,6 +12,7 @@
 - Stratification: each run writes `data/splits/{train,val,test}.txt` where every line is `path/to/shard.csv,<rows>`, covering exactly 70/15/15 of total rows across subjects and activities.
 - Tensor shards: preprocessing now also emits `data/processed_tensors/subject_<id>/activity_<id>.pt` so the loader can keep each shard in memory and avoid repeated CSV parsing.
 - Loader: `src/data.py` now auto-detects the manifests, loads tensor shards (prefetching by default), slices modality-specific columns (e.g., `imu_hand → hand_*`, `heart_rate → heart_rate_bpm`), and falls back to the legacy `.npy` layout when manifests aren’t present.
+- Chunking: dataset loader chunks each shard into blocks (default 2 048 samples) so dataloader length drops from ~42k to a few hundred batches without skipping any data.
 
 ## formatting/linting/type checking
 - formatting and linting done with ruff

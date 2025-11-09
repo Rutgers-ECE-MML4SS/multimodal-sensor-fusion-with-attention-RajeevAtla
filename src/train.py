@@ -251,6 +251,7 @@ def main(config: DictConfig):
         batch_size=config.dataset.batch_size,
         num_workers=config.dataset.num_workers,
         modality_dropout=config.training.augmentation.modality_dropout,
+        chunk_size=config.dataset.get("chunk_size"),
     )
 
     print(f"Train batches: {len(train_loader)}")

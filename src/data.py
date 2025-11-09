@@ -36,6 +36,7 @@ class MultimodalDataset(data.Dataset):
         modality_dropout: float = 0.0,
         max_shard_cache: int = 4,
         prefetch_shards: bool = True,
+        chunk_size: Optional[int] = None,
     ):
         """
         Args:
@@ -54,6 +55,7 @@ class MultimodalDataset(data.Dataset):
         self.modality_dropout = modality_dropout if split == "train" else 0.0
         self.prefetch_shards = prefetch_shards
         self.max_shard_cache = max(1, max_shard_cache)
+        self.chunk_size = chunk_size
 
         self.use_manifest = False
         self.data: Dict[str, np.ndarray] = {}
@@ -148,14 +150,14 @@ class MultimodalDataset(data.Dataset):
         self.use_manifest = True
         self._shard_paths: List[Path] = [e["path"] for e in entries]
         self._shard_rows: List[int] = [e["rows"] for e in entries]
-        self._cumulative_rows: List[int] = list(accumulate(self._shard_rows))
-        self._total_rows: int = self._cumulative_rows[-1]
+        self._total_rows: int = sum(self._shard_rows)
         self._shard_cache: OrderedDict[str, dict] = OrderedDict()
+        self._chunks: List[Tuple[int, int, int]] = self._build_chunks()
 
         if self.prefetch_shards:
-            for entry in entries:
-                payload = torch.load(entry["path"])
-                self._shard_cache[str(entry["path"])] = payload
+            for path in self._shard_paths:
+                payload = torch.load(path)
+                self._shard_cache[str(path)] = payload
             self.max_shard_cache = len(self._shard_paths)
         else:
             self.max_shard_cache = max(1, self.max_shard_cache)
@@ -188,13 +190,20 @@ class MultimodalDataset(data.Dataset):
             mapping[modality] = candidate
         return mapping
 
-    def _locate_shard_index(self, idx: int) -> Tuple[int, int]:
-        """Return (shard_idx, row_offset) for the provided global index."""
+    def _build_chunks(self) -> List[Tuple[int, int, int]]:
+        """Return list of (shard_idx, start_row, end_row) slices."""
 
-        shard_idx = bisect.bisect_left(self._cumulative_rows, idx + 1)
-        prev_total = self._cumulative_rows[shard_idx - 1] if shard_idx > 0 else 0
-        row_offset = idx - prev_total
-        return shard_idx, row_offset
+        chunks: List[Tuple[int, int, int]] = []
+        for shard_idx, rows in enumerate(self._shard_rows):
+            if self.chunk_size is None:
+                chunks.append((shard_idx, 0, rows))
+                continue
+            start = 0
+            while start < rows:
+                end = min(start + self.chunk_size, rows)
+                chunks.append((shard_idx, start, end))
+                start = end
+        return chunks
 
     def _get_shard_data(self, shard_idx: int) -> dict:
         """Load (or fetch cached) shard tensor payload."""
@@ -212,28 +221,9 @@ class MultimodalDataset(data.Dataset):
             self._shard_cache.popitem(last=False)
         return payload
 
-    def _get_manifest_sample(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
-        """Retrieve features/label for the given manifest-backed sample."""
-
-        shard_idx, row_offset = self._locate_shard_index(idx)
-        payload = self._get_shard_data(shard_idx)
-        data = payload["data"]
-        row = data[row_offset]
-
-        features: Dict[str, torch.Tensor] = {}
-        for modality, index_tensor in self._modality_index_tensors.items():
-            values = row.index_select(0, index_tensor)
-            if values.ndim == 0:
-                values = values.unsqueeze(0)
-            features[modality] = values.clone().float()
-
-        label_value = row[self._activity_col_index].item()
-        label = torch.tensor(int(label_value)).long()
-        return features, label
-
     def __len__(self) -> int:
         if self.use_manifest:
-            return self._total_rows
+            return len(self._chunks)
         return len(self.labels)
 
     def __getitem__(
@@ -248,7 +238,14 @@ class MultimodalDataset(data.Dataset):
             mask: Binary mask indicating available modalities
         """
         if self.use_manifest:
-            features, label = self._get_manifest_sample(idx)
+            shard_idx, start, end = self._chunks[idx]
+            payload = self._get_shard_data(shard_idx)
+            batch = payload["data"][start:end]
+            features = {
+                modality: batch.index_select(1, index_tensor).clone().float()
+                for modality, index_tensor in self._modality_index_tensors.items()
+            }
+            label = batch[:, self._activity_col_index].long()
         else:
             features = {}
             for modality in self.modalities:
@@ -261,16 +258,25 @@ class MultimodalDataset(data.Dataset):
             features = self.transform(features)
 
         # Create modality availability mask
-        mask = torch.ones(len(self.modalities))
+        if self.use_manifest:
+            mask = torch.ones(label.shape[0], len(self.modalities))
+        else:
+            mask = torch.ones(len(self.modalities))
 
         # Apply modality dropout during training
         if self.modality_dropout > 0:
             dropout_mask = torch.rand(len(self.modalities)) > self.modality_dropout
-            mask = mask * dropout_mask
+            if self.use_manifest:
+                mask = mask * dropout_mask.unsqueeze(0)
+            else:
+                mask = mask * dropout_mask
 
             # Ensure at least one modality is available
             if mask.sum() == 0:
-                mask[torch.randint(0, len(self.modalities), (1,))] = 1
+                if self.use_manifest:
+                    mask[:, torch.randint(0, len(self.modalities), (1,))] = 1
+                else:
+                    mask[torch.randint(0, len(self.modalities), (1,))] = 1
 
         return features, label, mask
 
@@ -367,6 +373,14 @@ def collate_multimodal(batch: List) -> Tuple[Dict, torch.Tensor, torch.Tensor]:
     return batch_features, batch_labels, batch_masks
 
 
+def collate_identity(batch: List):
+    """Return the single manifest chunk without stacking."""
+
+    if len(batch) != 1:
+        raise ValueError("Manifest dataloader expects batch_size=1.")
+    return batch[0]
+
+
 def create_dataloaders(
     dataset_name: str,
     data_dir: str,
@@ -391,6 +405,8 @@ def create_dataloaders(
     Returns:
         train_loader, val_loader, test_loader
     """
+    chunk_size = kwargs.get("chunk_size")
+
     if dataset_name == "synthetic":
         # Create synthetic datasets
         train_dataset = SyntheticMultimodalDataset(
@@ -419,51 +435,44 @@ def create_dataloaders(
             "train",
             modality_dropout=modality_dropout,
             prefetch_shards=True,
+            chunk_size=chunk_size,
         )
         val_dataset = MultimodalDataset(
             data_dir,
             modalities,
             "val",
             prefetch_shards=True,
+            chunk_size=chunk_size,
         )
         test_dataset = MultimodalDataset(
             data_dir,
             modalities,
             "test",
             prefetch_shards=True,
+            chunk_size=chunk_size,
         )
 
-    # Create dataloaders
-    persistent_workers = num_workers > 0
-    train_loader = data.DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        collate_fn=collate_multimodal,
-        pin_memory=False,
-        persistent_workers=persistent_workers,
-    )
+    def _build_loader(dataset, shuffle: bool) -> data.DataLoader:
+        persistent_workers = num_workers > 0
+        if getattr(dataset, "use_manifest", False):
+            loader_batch_size = 1
+            collate_fn = collate_identity
+        else:
+            loader_batch_size = batch_size
+            collate_fn = collate_multimodal
+        return data.DataLoader(
+            dataset,
+            batch_size=loader_batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            collate_fn=collate_fn,
+            pin_memory=False,
+            persistent_workers=persistent_workers,
+        )
 
-    val_loader = data.DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        collate_fn=collate_multimodal,
-        pin_memory=False,
-        persistent_workers=persistent_workers,
-    )
-
-    test_loader = data.DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        collate_fn=collate_multimodal,
-        pin_memory=False,
-        persistent_workers=persistent_workers,
-    )
+    train_loader = _build_loader(train_dataset, shuffle=True)
+    val_loader = _build_loader(val_dataset, shuffle=False)
+    test_loader = _build_loader(test_dataset, shuffle=False)
 
     return train_loader, val_loader, test_loader
 
