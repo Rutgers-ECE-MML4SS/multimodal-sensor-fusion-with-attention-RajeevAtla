@@ -1,0 +1,40 @@
+name: parallel run
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  run-fusion-parallel:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        fusion: [early, late, hybrid]
+
+    steps:
+      - name: Checkout repository - around 25s
+        uses: actions/checkout@v4
+
+      - name: Set up uv (cold start, no caching) - around 2s
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          activate-environment: "true"
+          enable-cache: "false"
+          restore-cache: "false"
+          save-cache: "false"
+          cache-python: "false"
+
+      - name: Sync dependencies - around 35s
+        run: uv sync
+
+      - name: Train ${{ matrix.fusion }} fusion for 5 epochs
+        env:
+          HYDRA_FULL_ERROR: "1"
+        run: |
+          echo "Running ${{ matrix.fusion }} fusion for 5 epochs"
+          uv run python src/train.py model.fusion_type=${{ matrix.fusion }} training.max_epochs=5
+          
