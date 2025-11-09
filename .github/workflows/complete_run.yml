@@ -30,5 +30,6 @@ jobs:
         
       - name: Run training
         run: |
+          export HYDRA_FULL_ERROR=1
           uv run python src/train.py training.max_epochs=1
           
