@@ -36,17 +36,17 @@ model:
       type: sequence
       input_dim: 17
       encoder_type: lstm
-      num_layers: 2
+      num_layers: 1
     imu_chest:
       type: sequence
       input_dim: 17
       encoder_type: lstm
-      num_layers: 2
+      num_layers: 1
     imu_ankle:
       type: sequence
       input_dim: 17
       encoder_type: lstm
-      num_layers: 2
+      num_layers: 1
     heart_rate:
       type: sequence
       input_dim: 1
