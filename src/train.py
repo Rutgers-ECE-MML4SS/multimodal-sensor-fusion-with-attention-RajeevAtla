@@ -237,8 +237,8 @@ class MultimodalFusionModule(pl.LightningModule):
     def configure_gradient_clipping(
         self,
         optimizer,
-        optimizer_idx,
-        gradient_clip_val,
+        optimizer_idx=None,
+        gradient_clip_val=None,
         gradient_clip_algorithm="norm",
     ):
         """Ensure gradients are clipped deterministically every step."""
