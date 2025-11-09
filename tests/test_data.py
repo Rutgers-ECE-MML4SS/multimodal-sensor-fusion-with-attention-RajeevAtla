@@ -48,11 +48,15 @@ def _make_manifest_dataset(
     splits_dir = base / "splits"
     splits_dir.mkdir(parents=True, exist_ok=True)
 
-    columns = [
-        f"{_normalize_manifest_prefix(modality)}_{axis}"
-        for modality in modalities
-        for axis in ("x", "y")
-    ] + ["activity_id"]
+    columns: list[str] = []
+    for modality in modalities:
+        normalized = modality.lower()
+        if normalized in {"heart_rate", "heart", "hr"}:
+            columns.append("heart_rate_bpm")
+        else:
+            prefix = _normalize_manifest_prefix(modality)
+            columns.extend([f"{prefix}_{axis}" for axis in ("x", "y")])
+    columns.append("activity_id")
 
     for split in ["train", "val", "test"]:
         entries: list[str] = []
@@ -68,6 +72,18 @@ def _make_manifest_dataset(
             entries.append(f"{shard_path},{rows_per_shard}")
         (splits_dir / f"{split}.txt").write_text("\n".join(entries))
     return str(base)
+
+
+def _save_shard(path: Path, columns: list[str], data: torch.Tensor) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"data": data, "columns": columns}, path)
+
+
+def _write_manifest_file(base: Path, split: str, lines: list[str]) -> Path:
+    path = base / "splits" / f"{split}.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines))
+    return path
 
 
 def test_multimodal_dataset_loading_and_dropout(tmp_path, monkeypatch):
@@ -231,6 +247,184 @@ def test_create_dataloaders_manifest_path(tmp_path):
     assert labels.shape == torch.Size([1])
     assert mask.shape == torch.Size([1, len(modalities)])
     assert set(features.keys()) == set(modalities)
+
+
+def test_manifest_relative_paths_and_zero_row_entries(tmp_path):
+    data_dir = tmp_path / "rel_manifest"
+    shard_dir = tmp_path / "rel_shards"
+    columns = ["sensor_x", "sensor_y", "activity_id"]
+    shard_path = shard_dir / "train.pt"
+    tensor = torch.tensor([[1.0, 2.0, 0.0], [3.0, 4.0, 0.0]])
+    _save_shard(shard_path, columns, tensor)
+
+    _write_manifest_file(
+        data_dir,
+        "train",
+        [
+            "",
+            "rel_shards/unused.pt,0",
+            "rel_shards/train.pt,2",
+        ],
+    )
+
+    dataset = data.MultimodalDataset(
+        data_dir=str(data_dir),
+        modalities=["sensor"],
+        split="train",
+    )
+    assert len(dataset) == 1  # chunk_size defaults to None
+    features, label, _ = dataset[0]
+    assert label.item() == 0
+    assert features["sensor"].shape[1] == 2
+
+
+def test_manifest_rejects_malformed_entry(tmp_path):
+    data_dir = tmp_path / "malformed_manifest"
+    _write_manifest_file(data_dir, "train", ["missing_comma_entry"])
+    with pytest.raises(ValueError, match="Malformed manifest entry"):
+        data.MultimodalDataset(
+            data_dir=str(data_dir),
+            modalities=["sensor"],
+            split="train",
+        )
+
+
+def test_manifest_missing_shard_file_raises(tmp_path):
+    data_dir = tmp_path / "missing_shard_manifest"
+    _write_manifest_file(data_dir, "train", ["ghost.pt,2"])
+    with pytest.raises(FileNotFoundError):
+        data.MultimodalDataset(
+            data_dir=str(data_dir),
+            modalities=["sensor"],
+            split="train",
+        )
+
+
+def test_manifest_without_valid_entries_raises(tmp_path):
+    data_dir = tmp_path / "empty_manifest"
+    _write_manifest_file(data_dir, "train", ["ignored.pt,0"])
+    with pytest.raises(ValueError, match="No shards found"):
+        data.MultimodalDataset(
+            data_dir=str(data_dir),
+            modalities=["sensor"],
+            split="train",
+        )
+
+
+def test_manifest_requires_activity_column(tmp_path):
+    data_dir = tmp_path / "needs_activity"
+    shard_path = tmp_path / "activityless.pt"
+    columns = ["sensor_x"]
+    tensor = torch.ones(1, len(columns))
+    _save_shard(shard_path, columns, tensor)
+    _write_manifest_file(data_dir, "train", [f"{shard_path},1"])
+
+    with pytest.raises(ValueError, match="activity_id"):
+        data.MultimodalDataset(
+            data_dir=str(data_dir),
+            modalities=["sensor"],
+            split="train",
+        )
+
+
+def test_manifest_supports_heart_rate_and_suffix_variants(tmp_path):
+    data_dir = tmp_path / "heart_manifest"
+    shard_path = tmp_path / "heart.pt"
+    columns = ["sensor_x", "sensor_y", "heart_rate_bpm", "activity_id"]
+    tensor = torch.tensor(
+        [
+            [1.0, 2.0, 70.0, 0.0],
+            [3.0, 4.0, 72.0, 0.0],
+        ]
+    )
+    _save_shard(shard_path, columns, tensor)
+    _write_manifest_file(data_dir, "train", [f"{shard_path},2"])
+
+    dataset = data.MultimodalDataset(
+        data_dir=str(data_dir),
+        modalities=["imu_sensor", "sensor_imu", "heart_rate"],
+        split="train",
+        chunk_size=2,
+    )
+
+    features, _, _ = dataset[0]
+    assert set(features.keys()) == {"imu_sensor", "sensor_imu", "heart_rate"}
+
+
+def test_manifest_missing_modality_mapping_raises(tmp_path):
+    data_dir = tmp_path / "missing_modality_manifest"
+    shard_path = tmp_path / "missing_modality.pt"
+    columns = ["sensor_x", "sensor_y", "activity_id"]
+    tensor = torch.zeros(2, len(columns))
+    _save_shard(shard_path, columns, tensor)
+    _write_manifest_file(data_dir, "train", [f"{shard_path},2"])
+
+    with pytest.raises(ValueError, match="Could not resolve modality"):
+        data.MultimodalDataset(
+            data_dir=str(data_dir),
+            modalities=["unknown_modality"],
+            split="train",
+        )
+
+
+def test_manifest_chunk_label_inconsistency_raises(tmp_path):
+    data_dir = tmp_path / "label_inconsistency"
+    shard_path = tmp_path / "mixed.pt"
+    columns = ["sensor_x", "sensor_y", "activity_id"]
+    tensor = torch.tensor(
+        [
+            [1.0, 2.0, 0.0],
+            [3.0, 4.0, 1.0],
+            [5.0, 6.0, 1.0],
+            [7.0, 8.0, 1.0],
+        ]
+    )
+    _save_shard(shard_path, columns, tensor)
+    _write_manifest_file(data_dir, "train", [f"{shard_path},4"])
+
+    dataset = data.MultimodalDataset(
+        data_dir=str(data_dir),
+        modalities=["sensor"],
+        split="train",
+        chunk_size=2,
+    )
+
+    with pytest.raises(ValueError, match="Activity id varies"):
+        dataset[0]
+
+
+def test_manifest_dropout_mask_never_all_zero(tmp_path):
+    modalities = ["imu_left", "imu_right"]
+    root = _make_manifest_dataset(tmp_path, modalities, rows_per_shard=2)
+
+    dataset = data.MultimodalDataset(
+        data_dir=root,
+        modalities=modalities,
+        split="train",
+        chunk_size=2,
+        modality_dropout=1.0,
+    )
+
+    _, _, mask = dataset[0]
+    assert int(mask.sum()) == 1
+
+
+def test_collate_identity_requires_single_sample():
+    with pytest.raises(ValueError, match="batch_size=1"):
+        data.collate_identity([(None, None, None), (None, None, None)])
+
+
+def test_numpy_dataset_require_labels_guard(tmp_path):
+    modalities = ["mod1"]
+    root = _make_dataset_dir(tmp_path, modalities, num_samples=2)
+    dataset = data.MultimodalDataset(
+        data_dir=root,
+        modalities=modalities,
+        split="train",
+    )
+    dataset.labels = None  # type: ignore[assignment]
+    with pytest.raises(RuntimeError, match="Labels are not loaded"):
+        len(dataset)
 
 
 def test_simulate_missing_modalities():
