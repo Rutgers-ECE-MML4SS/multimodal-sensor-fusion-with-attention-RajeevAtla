@@ -28,6 +28,7 @@ dependencies = [
     "torchvision>=0.24.0",
     "tqdm>=4.67.1",
     "ty>=0.0.1a25",
+    "intel-extension-for-pytorch>=2.8.0"
 ]
 
 [tool.ruff]

@@ -73,7 +73,7 @@ training:
   gradient_clip_norm: 1.0
   gradient_accumulation: 4
   enable_compile: true
-  compile_backend: inductor
+  compile_backend: ipex
   compile_mode: reduce-overhead
   compile_cache_size: 8
   early_stopping_patience: 10
