@@ -118,5 +118,5 @@ seed: 42  # Fixed seed ensures reproducible results
 
 # Compute
 device: cpu  # Will auto-detect GPU if available, but CPU is required baseline
-mixed_precision: false  # Set true if using GPU with FP16 support
+mixed_precision: true  # Set true if using GPU with FP16 support
 
