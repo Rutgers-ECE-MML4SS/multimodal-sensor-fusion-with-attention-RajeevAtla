@@ -6,8 +6,11 @@ Most infrastructure is provided - students need to integrate their fusion models
 """
 
 import copy
+import contextlib
 import os
+import shutil
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,6 +30,7 @@ from encoders import build_encoder
 
 
 _COMPILED_MODULE_CACHE: "OrderedDict[str, nn.Module]" = OrderedDict()
+_RESULT_WRITER = ThreadPoolExecutor(max_workers=1)
 
 
 def _configure_torch_threads(max_threads: Optional[int] = None) -> None:
@@ -48,6 +52,18 @@ def _configure_torch_threads(max_threads: Optional[int] = None) -> None:
             set_interop(interop)
         except Exception:  # pragma: no cover - platform dependent
             pass
+
+
+def _configure_matmul_precision(mode: Optional[str] = None) -> None:
+    """Set PyTorch matmul precision for float32 ops."""
+
+    setter = getattr(torch, "set_float32_matmul_precision", None)
+    if setter is None or not mode:
+        return
+    try:
+        setter(mode)
+    except Exception:  # pragma: no cover - platform dependent
+        pass
 
 
 def _clone_module(module: nn.Module) -> nn.Module:
@@ -100,6 +116,103 @@ def _compile_with_cache(
     compiled = compile_fn(module, backend=backend, mode=mode)
     _remember_compiled_module(cache_key, compiled, cache_limit)
     return compiled
+
+
+def _parse_manifest_paths(manifest_path: Path) -> List[Path]:
+    """Return absolute shard paths referenced by a manifest file."""
+
+    shard_paths: List[Path] = []
+    if not manifest_path.exists():
+        return shard_paths
+    project_root = (
+        manifest_path.parents[2]
+        if len(manifest_path.parents) >= 3
+        else Path(".")
+    )
+    with manifest_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or "," not in line:
+                continue
+            path_str, _ = line.split(",", 1)
+            shard_path = Path(path_str)
+            if not shard_path.is_absolute():
+                shard_path = (project_root / shard_path).resolve()
+            shard_paths.append(shard_path)
+    return shard_paths
+
+
+def _stage_dataset_if_needed(config: DictConfig) -> Path:
+    """Optionally copy referenced tensor shards to tmpfs and return new data dir."""
+
+    dataset_cfg = config.dataset
+    source_dir = Path(dataset_cfg.data_dir).resolve()
+    if not bool(dataset_cfg.get("use_tmpfs", False)):
+        return source_dir
+    if os.name != "posix":
+        return source_dir
+    tmpfs_root = Path(dataset_cfg.get("tmpfs_root", "/dev/shm/a2_dataset"))
+    if not tmpfs_root.exists():
+        try:
+            tmpfs_root.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return source_dir
+
+    target_dir = (tmpfs_root / source_dir.name).resolve()
+    if target_dir.exists():
+        return target_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    splits_src = source_dir / "splits"
+    splits_dst = target_dir / "splits"
+    if splits_src.exists():
+        shutil.copytree(splits_src, splits_dst, dirs_exist_ok=True)
+
+    manifest_files = [
+        splits_dst / "train.txt",
+        splits_dst / "val.txt",
+        splits_dst / "test.txt",
+    ]
+
+    shard_paths: List[Path] = []
+    for manifest in manifest_files:
+        original_manifest = (
+            splits_src / manifest.name if splits_src.exists() else manifest
+        )
+        shard_paths.extend(_parse_manifest_paths(original_manifest))
+
+    copied = 0
+    for shard in shard_paths:
+        if not shard.exists():
+            continue
+        try:
+            rel_path = shard.relative_to(source_dir)
+        except ValueError:
+            rel_path = shard.name
+        dest = target_dir / rel_path
+        if dest.exists():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(shard, dest)
+        copied += 1
+
+    if copied == 0:
+        # Fallback to copying entire directory if pattern selection failed
+        shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+
+    return target_dir
+
+
+def _write_results_async(path: Path, payload: Dict[str, Any]) -> None:
+    """Persist results JSON using the background executor."""
+
+    def _writer(target: Path, data: Dict[str, Any]) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+
+    future = _RESULT_WRITER.submit(_writer, path, payload)
+    future.result()
 
 
 class MultimodalFusionModule(pl.LightningModule):
@@ -168,6 +281,9 @@ class MultimodalFusionModule(pl.LightningModule):
         # Metrics storage
         cast_self.train_metrics = []
         cast_self.val_metrics = []
+        self.autocast_enabled = bool(
+            config.training.get("cpu_autocast", False)
+        )
         self._maybe_compile_modules()
 
     def _maybe_compile_modules(self) -> None:
@@ -181,7 +297,7 @@ class MultimodalFusionModule(pl.LightningModule):
             return
 
         backend = self.config.training.get("compile_backend", "inductor")
-        mode = self.config.training.get("compile_mode", "reduce-overhead")
+        mode = self.config.training.get("compile_mode", "max-autotune")
         cache_limit = int(self.config.training.get("compile_cache_size", 0))
 
         for name, encoder in list(self.encoders.items()):
@@ -210,6 +326,23 @@ class MultimodalFusionModule(pl.LightningModule):
                 RuntimeWarning,
             )
 
+    def _autocast_context(self):
+        """Return autocast context for CPU/GPU depending on configuration."""
+
+        if not self.autocast_enabled:
+            return contextlib.nullcontext()
+        device_type = (
+            "cuda" if self.device.type == "cuda" else "cpu"
+        )  # type: ignore[attr-defined]
+        dtype = torch.float16 if device_type == "cuda" else torch.bfloat16
+        try:
+            return torch.autocast(
+                device_type=device_type, dtype=dtype, enabled=True
+            )
+        except RuntimeError:
+            self.autocast_enabled = False
+            return contextlib.nullcontext()
+
     def forward(self, features, mask=None):
         """
         Forward pass through encoders and fusion model.
@@ -221,40 +354,44 @@ class MultimodalFusionModule(pl.LightningModule):
         Returns:
             logits: Class predictions
         """
-        # Encode each modality
-        encoded_features = {}
-        modality_order = list(self.encoders.keys())
-        fold_size_cfg = int(self.config.model.get("modality_fold_size", 0))
-        fold_size = (
-            len(modality_order)
-            if fold_size_cfg <= 0
-            else max(1, min(fold_size_cfg, len(modality_order)))
-        )
+        with self._autocast_context():
+            # Encode each modality
+            encoded_features = {}
+            modality_order = list(self.encoders.keys())
+            fold_size_cfg = int(self.config.model.get("modality_fold_size", 0))
+            fold_size = (
+                len(modality_order)
+                if fold_size_cfg <= 0
+                else max(1, min(fold_size_cfg, len(modality_order)))
+            )
 
-        for start in range(0, len(modality_order), fold_size):
-            fold_modalities = modality_order[start : start + fold_size]
-            for modality in fold_modalities:
-                if modality not in features:
-                    continue
-                encoded = self.encoders[modality](features[modality])
-                if self.use_layer_norm and modality in self.layer_norms:
-                    encoded = self.layer_norms[modality](encoded)
-                encoded_features[modality] = encoded
+            for start in range(0, len(modality_order), fold_size):
+                fold_modalities = modality_order[start : start + fold_size]
+                for modality in fold_modalities:
+                    if modality not in features:
+                        continue
+                    encoded = self.encoders[modality](features[modality])
+                    if (
+                        self.use_layer_norm
+                        and modality in self.layer_norms
+                    ):
+                        encoded = self.layer_norms[modality](encoded)
+                    encoded_features[modality] = encoded
 
-        # Fusion
-        # TODO: Students ensure their fusion model returns correct format
-        # For late fusion, may return tuple (logits, per_modality_logits)
-        output = self.fusion_model(encoded_features, mask)
+            # Fusion
+            # TODO: Students ensure their fusion model returns correct format
+            # For late fusion, may return tuple (logits, per_modality_logits)
+            output = self.fusion_model(encoded_features, mask)
 
-        # Handle different fusion output formats
-        if isinstance(output, tuple):
-            logits = output[
-                0
-            ]  # Late fusion returns (fused_logits, per_modality_logits)
-        else:
-            logits = output
+            # Handle different fusion output formats
+            if isinstance(output, tuple):
+                logits = output[
+                    0
+                ]  # Late fusion returns (fused_logits, per_modality_logits)
+            else:
+                logits = output
 
-        return logits
+            return logits
 
     def _log_metric(self, name: str, value: torch.Tensor, **kwargs: Any) -> None:
         """Call `self.log` only when the trainer reference is registered."""
@@ -411,6 +548,8 @@ def main(config: DictConfig):
 
     cpu_budget = min(4, os.cpu_count() or 4)
     _configure_torch_threads(cpu_budget)
+    _configure_matmul_precision(config.training.get("matmul_precision"))
+    dataset_data_dir = _stage_dataset_if_needed(config)
 
     # Set random seed for reproducibility
     pl.seed_everything(config.seed)
@@ -423,7 +562,7 @@ def main(config: DictConfig):
     print("\nCreating dataloaders...")
     train_loader, val_loader, test_loader = create_dataloaders(
         dataset_name=config.dataset.name,
-        data_dir=config.dataset.data_dir,
+        data_dir=str(dataset_data_dir),
         modalities=config.dataset.modalities,
         batch_size=config.dataset.batch_size,
         num_workers=config.dataset.num_workers,
@@ -458,6 +597,7 @@ def main(config: DictConfig):
         mode="min",
         save_top_k=config.experiment.save_top_k,
         save_last=True,
+        save_on_train_epoch_end=False,
     )
 
     early_stopping = EarlyStopping(
@@ -505,8 +645,7 @@ def main(config: DictConfig):
     }
 
     results_file = save_dir / "results.json"
-    with open(results_file, "w") as f:
-        json.dump(results, f, indent=2)
+    _write_results_async(results_file, results)
 
     print(f"\nTraining complete! Results saved to: {results_file}")
     print(f"Best model: {best_model_path}")

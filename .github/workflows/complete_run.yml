@@ -31,8 +31,9 @@ jobs:
       - name: Run fusion sweep (early/late/hybrid, short runs)
         run: |
           export HYDRA_FULL_ERROR=1
+          COMMON_OVERRIDES="training.max_epochs=5 training.warmup_epochs=0 training.gradient_accumulation=1 training.augmentation.temporal_jitter=0 training.augmentation.gaussian_noise=0 training.augmentation.modality_dropout=0 model.hidden_dim=128 model.output_dim=64 model.modality_fold_size=2 model.encoders.imu_hand.num_layers=1 model.encoders.imu_chest.num_layers=1 model.encoders.imu_ankle.num_layers=1 model.encoders.heart_rate.num_layers=1 dataset.prefetch_shards=false dataset.chunk_size=256 dataset.use_tmpfs=true dataset.pin_memory=false dataset.tmpfs_root=/dev/shm/a2_dataset training.cpu_autocast=true training.matmul_precision=high training.compile_mode=max-autotune"
           for fusion in early late hybrid; do
             echo "Running ${fusion} fusion for 5 epochs"
-            uv run python src/train.py model.fusion_type=${fusion} training.max_epochs=5
+            uv run python src/train.py model.fusion_type=${fusion} ${COMMON_OVERRIDES}
           done
           
