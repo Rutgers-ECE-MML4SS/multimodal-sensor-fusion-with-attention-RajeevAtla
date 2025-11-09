@@ -16,6 +16,9 @@ dataset:
   batch_size: 32  # Adjust for your RAM (16-64 typical for CPU)
   num_workers: 4  # Parallel data loading (0-4 for CPU)
   chunk_size: 512  # Number of timesteps per manifest chunk
+  prefetch_shards: true  # Keep manifest shards resident in RAM
+  pin_memory: false  # Enable when running on GPU
+  chunk_cache_dir: ./data/splits/cache  # Where cached chunk metadata is stored
 
 # Model configuration
 model:
@@ -25,7 +28,8 @@ model:
   num_heads: 4  # For attention mechanisms
   dropout: 0.1
   layer_norm: true
-  
+  modality_fold_size: 0  # 0 = process all modalities per pass
+
   # Encoder configurations per modality
   encoders:
     imu_hand:
@@ -68,6 +72,9 @@ training:
   warmup_epochs: 5
   gradient_clip_norm: 1.0
   gradient_accumulation: 2
+  compile_backend: inductor
+  compile_mode: reduce-overhead
+  compile_cache_size: 8
   early_stopping_patience: 10
   label_smoothing: 0.05
   

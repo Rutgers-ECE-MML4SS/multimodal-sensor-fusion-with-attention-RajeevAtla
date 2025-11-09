@@ -35,6 +35,7 @@ class MultimodalDataset(data.Dataset):
         max_shard_cache: int = 4,
         prefetch_shards: bool = True,
         chunk_size: Optional[int] = None,
+        chunk_cache_dir: Optional[str] = None,
     ):
         """
         Args:
@@ -54,6 +55,10 @@ class MultimodalDataset(data.Dataset):
         self.prefetch_shards = prefetch_shards
         self.max_shard_cache = max(1, max_shard_cache)
         self.chunk_size = chunk_size
+        self.chunk_cache_dir = (
+            Path(chunk_cache_dir) if chunk_cache_dir is not None else None
+        )
+        self._chunk_cache_path: Optional[Path] = None
 
         self.use_manifest = False
         self.data: Dict[str, np.ndarray] = {}
@@ -156,7 +161,12 @@ class MultimodalDataset(data.Dataset):
         self._shard_rows: List[int] = [e["rows"] for e in entries]
         self._total_rows: int = len(self._shard_rows)
         self._shard_cache: OrderedDict[str, dict] = OrderedDict()
-        self._chunks: List[Tuple[int, int, int]] = self._build_chunks()
+        if self.chunk_cache_dir is not None:
+            cache_name = f"{self.split}_chunks_{self.chunk_size or 'full'}.pt"
+            self.chunk_cache_dir.mkdir(parents=True, exist_ok=True)
+            self._chunk_cache_path = self.chunk_cache_dir / cache_name
+
+        self._chunks = self._load_or_build_chunks()
 
         if self.prefetch_shards:
             for path in self._shard_paths:
@@ -211,6 +221,23 @@ class MultimodalDataset(data.Dataset):
                 end = min(start + self.chunk_size, rows)
                 chunks.append((shard_idx, start, end))
                 start = end
+        return chunks
+
+    def _load_or_build_chunks(self) -> List[Tuple[int, int, int]]:
+        """Load cached chunk slices when available, otherwise build and persist."""
+
+        if self._chunk_cache_path and self._chunk_cache_path.exists():
+            try:
+                cached = torch.load(self._chunk_cache_path)
+                return [
+                    (int(a), int(b), int(c)) for a, b, c in cached  # type: ignore[arg-type]
+                ]
+            except Exception:
+                pass
+
+        chunks = self._build_chunks()
+        if self._chunk_cache_path is not None:
+            torch.save(chunks, self._chunk_cache_path)
         return chunks
 
     def _get_shard_data(self, shard_idx: int) -> dict:
@@ -423,6 +450,9 @@ def create_dataloaders(
     num_workers: int = 4,
     modality_dropout: float = 0.0,
     pin_memory: Optional[bool] = None,
+    prefetch_shards: bool = True,
+    chunk_size: Optional[int] = None,
+    chunk_cache_dir: Optional[str] = None,
     **kwargs,
 ) -> Tuple[data.DataLoader, data.DataLoader, data.DataLoader]:
     """
@@ -442,8 +472,6 @@ def create_dataloaders(
     Returns:
         train_loader, val_loader, test_loader
     """
-    chunk_size = kwargs.get("chunk_size")
-
     if dataset_name == "synthetic":
         # Create synthetic datasets
         train_dataset = SyntheticMultimodalDataset(
@@ -477,22 +505,25 @@ def create_dataloaders(
             modalities,
             "train",
             modality_dropout=modality_dropout,
-            prefetch_shards=True,
+            prefetch_shards=prefetch_shards,
             chunk_size=chunk_size,
+            chunk_cache_dir=chunk_cache_dir,
         )
         val_dataset = MultimodalDataset(
             data_dir,
             modalities,
             "val",
-            prefetch_shards=True,
+            prefetch_shards=prefetch_shards,
             chunk_size=chunk_size,
+            chunk_cache_dir=chunk_cache_dir,
         )
         test_dataset = MultimodalDataset(
             data_dir,
             modalities,
             "test",
-            prefetch_shards=True,
+            prefetch_shards=prefetch_shards,
             chunk_size=chunk_size,
+            chunk_cache_dir=chunk_cache_dir,
         )
 
     pin_memory_flag = (

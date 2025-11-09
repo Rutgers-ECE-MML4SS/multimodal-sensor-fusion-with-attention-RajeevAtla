@@ -16,6 +16,10 @@
 - Training: gradient clipping is enforced via `training.gradient_clip_norm` (default 1.0) so Lightning clamps gradients during every optimizer step.
 - Sequence batches: Each manifest chunk is treated as a single `[batch=1, seq_len, feature_dim]` sample so all IMU/HR streams flow through the `SequenceEncoder` path; labels stay constant per shard (activity ID).
 - Numerical hygiene: manifest/Numpy payloads are sanitized with `torch.nan_to_num` inside `MultimodalDataset.__getitem__` so NaN/Inf rows from preprocessing don’t propagate into training loss.
+- Loader perf knobs:
+  - `dataset.prefetch_shards` toggles whether manifest shards stay pinned in RAM.
+  - `dataset.pin_memory` controls DataLoader pinning (handy for GPU experiments).
+  - Chunk metadata is cached under `dataset.chunk_cache_dir` so reruns don’t recompute shard windows; delete the `.pt` files if chunk sizes change.
 
 ## formatting/linting/type checking
 - formatting and linting done with ruff
@@ -27,3 +31,7 @@
 - `complete_run.yml` now runs a quick fusion sweep (early/late/hybrid, 5 epochs each) via `uv run python src/train.py model.fusion_type=<type> training.max_epochs=5` to validate all heads without blowing the time budget.
 - Lightning’s `configure_gradient_clipping` hook was updated to accept optional `optimizer_idx`/clip args, matching the latest API so CI runs don’t crash when clipping is enabled.
 - `build_fusion_model` strips hybrid-only kwargs (e.g., `num_heads`) before instantiating Early/Late fusion, keeping a single Hydra config compatible with every architecture.
+- Training perf knobs:
+  - `training.gradient_accumulation` emulates larger batches even when manifest chunks stay at batch_size=1.
+  - Torch threading gets clamped to the 4-core GitHub runner via `_configure_torch_threads`, and `torch.compile` is enabled with a tiny LRU cache so successive runs reuse compiled graphs.
+  - `model.modality_fold_size` lets you process modalities in smaller folds without altering fusion architectures (set `0` to keep the legacy “all at once” behavior).

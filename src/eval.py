@@ -305,6 +305,10 @@ def main():
         modalities=config.dataset.modalities,
         batch_size=config.dataset.batch_size,
         num_workers=config.dataset.num_workers,
+        chunk_size=config.dataset.get("chunk_size"),
+        prefetch_shards=config.dataset.get("prefetch_shards", True),
+        pin_memory=config.dataset.get("pin_memory"),
+        chunk_cache_dir=config.dataset.get("chunk_cache_dir"),
     )
 
     # Standard evaluation

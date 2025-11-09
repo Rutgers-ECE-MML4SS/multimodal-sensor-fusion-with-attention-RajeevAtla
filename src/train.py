@@ -5,6 +5,7 @@ Uses PyTorch Lightning for training with Hydra configuration.
 Most infrastructure is provided - students need to integrate their fusion models.
 """
 
+import copy
 import os
 import warnings
 import torch
@@ -18,10 +19,14 @@ from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 import json
 from typing import Any, Dict, List, Optional, cast
+from collections import OrderedDict
 
 from data import create_dataloaders
 from fusion import build_fusion_model
 from encoders import build_encoder
+
+
+_COMPILED_MODULE_CACHE: "OrderedDict[str, nn.Module]" = OrderedDict()
 
 
 def _configure_torch_threads(max_threads: Optional[int] = None) -> None:
@@ -43,6 +48,58 @@ def _configure_torch_threads(max_threads: Optional[int] = None) -> None:
             set_interop(interop)
         except Exception:  # pragma: no cover - platform dependent
             pass
+
+
+def _clone_module(module: nn.Module) -> nn.Module:
+    """Return a detached copy of a module, preserving type and buffers."""
+
+    return copy.deepcopy(module)
+
+
+def _remember_compiled_module(
+    key: str, module: nn.Module, limit: int
+) -> None:
+    """Store a compiled module template for later reuse."""
+
+    if limit <= 0:
+        return
+    snapshot = _clone_module(module).cpu()
+    _COMPILED_MODULE_CACHE[key] = snapshot
+    while len(_COMPILED_MODULE_CACHE) > limit:
+        _COMPILED_MODULE_CACHE.popitem(last=False)
+
+
+def _load_compiled_from_cache(key: str) -> Optional[nn.Module]:
+    """Retrieve a cached compiled module copy."""
+
+    cached = _COMPILED_MODULE_CACHE.get(key)
+    if cached is None:
+        return None
+    return _clone_module(cached)
+
+
+def _compile_with_cache(
+    module: nn.Module,
+    cache_key: str,
+    backend: str,
+    mode: str,
+    cache_limit: int,
+) -> nn.Module:
+    """Compile a module with torch.compile, reusing cached graphs when possible."""
+
+    compile_fn = getattr(torch, "compile", None)
+    if compile_fn is None:
+        return module
+
+    cached = _load_compiled_from_cache(cache_key)
+    if cached is not None:
+        cached.load_state_dict(module.state_dict())
+        cached.to(next(module.parameters()).device)
+        return cached
+
+    compiled = compile_fn(module, backend=backend, mode=mode)
+    _remember_compiled_module(cache_key, compiled, cache_limit)
+    return compiled
 
 
 class MultimodalFusionModule(pl.LightningModule):
@@ -122,11 +179,13 @@ class MultimodalFusionModule(pl.LightningModule):
 
         backend = self.config.training.get("compile_backend", "inductor")
         mode = self.config.training.get("compile_mode", "reduce-overhead")
+        cache_limit = int(self.config.training.get("compile_cache_size", 0))
 
         for name, encoder in list(self.encoders.items()):
+            cache_key = f"encoder::{encoder.__class__.__name__}"
             try:
-                self.encoders[name] = compile_fn(
-                    encoder, backend=backend, mode=mode
+                self.encoders[name] = _compile_with_cache(
+                    encoder, cache_key, backend, mode, cache_limit
                 )
             except Exception as exc:  # pragma: no cover - fallback path
                 warnings.warn(
@@ -135,8 +194,12 @@ class MultimodalFusionModule(pl.LightningModule):
                 )
 
         try:
-            self.fusion_model = compile_fn(
-                self.fusion_model, backend=backend, mode=mode
+            self.fusion_model = _compile_with_cache(
+                self.fusion_model,
+                f"fusion::{self.fusion_model.__class__.__name__}",
+                backend,
+                mode,
+                cache_limit,
             )
         except Exception as exc:  # pragma: no cover - fallback path
             warnings.warn(
@@ -157,9 +220,20 @@ class MultimodalFusionModule(pl.LightningModule):
         """
         # Encode each modality
         encoded_features = {}
-        for modality, encoder in self.encoders.items():
-            if modality in features:
-                encoded = encoder(features[modality])
+        modality_order = list(self.encoders.keys())
+        fold_size_cfg = int(self.config.model.get("modality_fold_size", 0))
+        fold_size = (
+            len(modality_order)
+            if fold_size_cfg <= 0
+            else max(1, min(fold_size_cfg, len(modality_order)))
+        )
+
+        for start in range(0, len(modality_order), fold_size):
+            fold_modalities = modality_order[start : start + fold_size]
+            for modality in fold_modalities:
+                if modality not in features:
+                    continue
+                encoded = self.encoders[modality](features[modality])
                 if self.use_layer_norm and modality in self.layer_norms:
                     encoded = self.layer_norms[modality](encoded)
                 encoded_features[modality] = encoded
@@ -352,6 +426,9 @@ def main(config: DictConfig):
         num_workers=config.dataset.num_workers,
         modality_dropout=config.training.augmentation.modality_dropout,
         chunk_size=config.dataset.get("chunk_size"),
+        prefetch_shards=config.dataset.get("prefetch_shards", True),
+        pin_memory=config.dataset.get("pin_memory"),
+        chunk_cache_dir=config.dataset.get("chunk_cache_dir"),
     )
 
     print(f"Train batches: {len(train_loader)}")
