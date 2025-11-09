@@ -24,7 +24,6 @@ from collections import OrderedDict
 from data import create_dataloaders
 from fusion import build_fusion_model
 from encoders import build_encoder
-import intel_extension_for_pytorch as ipex
 
 
 _COMPILED_MODULE_CACHE: "OrderedDict[str, nn.Module]" = OrderedDict()
