@@ -5,6 +5,8 @@ Uses PyTorch Lightning for training with Hydra configuration.
 Most infrastructure is provided - students need to integrate their fusion models.
 """
 
+import os
+import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,11 +17,32 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 import json
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Optional, cast
 
 from data import create_dataloaders
 from fusion import build_fusion_model
 from encoders import build_encoder
+
+
+def _configure_torch_threads(max_threads: Optional[int] = None) -> None:
+    """Clamp PyTorch thread usage to the available CPU budget."""
+
+    available = os.cpu_count() or 1
+    target = max_threads if max_threads is not None else available
+    target = max(1, min(target, available))
+    interop = max(1, target // 2)
+
+    try:
+        torch.set_num_threads(target)
+    except Exception:  # pragma: no cover - platform dependent
+        pass
+
+    set_interop = getattr(torch, "set_num_interop_threads", None)
+    if set_interop is not None:
+        try:
+            set_interop(interop)
+        except Exception:  # pragma: no cover - platform dependent
+            pass
 
 
 class MultimodalFusionModule(pl.LightningModule):
@@ -88,6 +111,38 @@ class MultimodalFusionModule(pl.LightningModule):
         # Metrics storage
         cast_self.train_metrics = []
         cast_self.val_metrics = []
+        self._maybe_compile_modules()
+
+    def _maybe_compile_modules(self) -> None:
+        """Compile encoders and fusion modules when torch.compile is available."""
+
+        compile_fn = getattr(torch, "compile", None)
+        if compile_fn is None:
+            return
+
+        backend = self.config.training.get("compile_backend", "inductor")
+        mode = self.config.training.get("compile_mode", "reduce-overhead")
+
+        for name, encoder in list(self.encoders.items()):
+            try:
+                self.encoders[name] = compile_fn(
+                    encoder, backend=backend, mode=mode
+                )
+            except Exception as exc:  # pragma: no cover - fallback path
+                warnings.warn(
+                    f"torch.compile failed for encoder '{name}': {exc}",
+                    RuntimeWarning,
+                )
+
+        try:
+            self.fusion_model = compile_fn(
+                self.fusion_model, backend=backend, mode=mode
+            )
+        except Exception as exc:  # pragma: no cover - fallback path
+            warnings.warn(
+                f"torch.compile failed for fusion model: {exc}",
+                RuntimeWarning,
+            )
 
     def forward(self, features, mask=None):
         """
@@ -277,6 +332,9 @@ def main(config: DictConfig):
     print(OmegaConf.to_yaml(config))
     print("=" * 80)
 
+    cpu_budget = min(4, os.cpu_count() or 4)
+    _configure_torch_threads(cpu_budget)
+
     # Set random seed for reproducibility
     pl.seed_everything(config.seed)
 
@@ -341,6 +399,9 @@ def main(config: DictConfig):
         callbacks=[checkpoint_callback, early_stopping],
         log_every_n_steps=config.experiment.log_every_n_steps,
         gradient_clip_val=config.training.gradient_clip_norm,
+        accumulate_grad_batches=config.training.get(
+            "gradient_accumulation", 1
+        ),
         deterministic=True,
         enable_progress_bar=True,
     )

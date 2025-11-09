@@ -15,7 +15,7 @@ dataset:
   test_split: 0.15
   batch_size: 32  # Adjust for your RAM (16-64 typical for CPU)
   num_workers: 4  # Parallel data loading (0-4 for CPU)
-  chunk_size: 1024  # Number of timesteps per manifest chunk
+  chunk_size: 512  # Number of timesteps per manifest chunk
 
 # Model configuration
 model:
@@ -67,6 +67,7 @@ training:
   scheduler: cosine
   warmup_epochs: 5
   gradient_clip_norm: 1.0
+  gradient_accumulation: 2
   early_stopping_patience: 10
   label_smoothing: 0.05
   
