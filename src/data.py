@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 import warnings
 
 import numpy as np
@@ -558,24 +558,35 @@ def create_dataloaders(
     else:
         effective_prefetch = prefetch_factor
 
-    def _build_loader(dataset, shuffle: bool) -> data.DataLoader:
+    def _build_loader(
+        dataset: data.Dataset[Any], shuffle: bool
+    ) -> data.DataLoader[Any]:
         if getattr(dataset, "use_manifest", False):
             loader_batch_size = 1
             collate_fn = collate_identity
         else:
             loader_batch_size = batch_size
             collate_fn = collate_multimodal
-        loader_kwargs = dict(
+        if effective_prefetch is None:
+            return data.DataLoader(
+                dataset,
+                batch_size=loader_batch_size,
+                shuffle=shuffle,
+                num_workers=num_workers,
+                collate_fn=collate_fn,
+                pin_memory=pin_memory_flag,
+                persistent_workers=persistent_workers_flag,
+            )
+        return data.DataLoader(
+            dataset,
             batch_size=loader_batch_size,
             shuffle=shuffle,
             num_workers=num_workers,
             collate_fn=collate_fn,
             pin_memory=pin_memory_flag,
             persistent_workers=persistent_workers_flag,
+            prefetch_factor=effective_prefetch,
         )
-        if effective_prefetch is not None:
-            loader_kwargs["prefetch_factor"] = effective_prefetch
-        return data.DataLoader(dataset, **loader_kwargs)
 
     train_loader = _build_loader(train_dataset, shuffle=True)
     val_loader = _build_loader(val_dataset, shuffle=False)
