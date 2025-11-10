@@ -7,6 +7,7 @@ Provides framework for:
 - Generating results for experiments/ directory
 """
 
+import time
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -109,6 +110,39 @@ def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
         return metrics, (all_preds, all_labels, all_confidences)
     else:
         return metrics
+
+
+def measure_inference_latency(model, dataloader, device="cpu") -> tuple[float, float]:
+    """
+    Measure per-sample inference latency statistics (mean/std in ms).
+
+    Args:
+        model: Trained model
+        dataloader: Data loader
+        device: Device to run on
+
+    Returns:
+        mean_ms: Average per-sample latency (ms)
+        std_ms: Standard deviation of per-sample latency (ms)
+    """
+    model.eval()
+    model.to(device)
+    per_sample_ms: list[float] = []
+
+    with torch.no_grad():
+        for features, labels, mask in dataloader:
+            batch_start = time.perf_counter()
+            features = {k: v.to(device) for k, v in features.items()}
+            model(features, mask.to(device))
+            elapsed = time.perf_counter() - batch_start
+            batch_size = labels.size(0)
+            if batch_size > 0:
+                per_sample_ms.append((elapsed / batch_size) * 1000.0)
+
+    if not per_sample_ms:
+        return 0.0, 0.0
+    arr = np.asarray(per_sample_ms, dtype=np.float64)
+    return float(arr.mean()), float(arr.std(ddof=0))
 
 
 def evaluate_missing_modalities(
@@ -346,6 +380,15 @@ def main():
     )
     print(f"ECE: {ece:.4f}")
 
+    # Inference latency
+    print("\nMeasuring inference latency...")
+    latency_mean_ms, latency_std_ms = measure_inference_latency(
+        model, test_loader, args.device
+    )
+    print(
+        f"Per-sample inference time: {latency_mean_ms:.3f} ± {latency_std_ms:.3f} ms"
+    )
+
     # Save standard results
     standard_results = {
         "dataset": config.dataset.name,
@@ -354,6 +397,8 @@ def main():
         "test_f1_macro": metrics["f1_macro"],
         "test_loss": metrics["loss"],
         "ece": ece,
+        "inference_ms_mean": latency_mean_ms,
+        "inference_ms_std": latency_std_ms,
     }
 
     # Missing modality test

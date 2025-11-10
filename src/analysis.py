@@ -352,11 +352,7 @@ def generate_all_plots(
     experiment_dir: Path | str, output_dir: Path | str
 ) -> None:
     """
-    Generate all required plots from experiment results.
-
-    Args:
-        experiment_dir: Directory containing experiment JSON files
-        output_dir: Directory to save plots
+    Generate plots for each fusion type under experiments/<fusion>/.
     """
     experiment_path = Path(experiment_dir)
     output_path = Path(output_dir)
@@ -366,43 +362,50 @@ def generate_all_plots(
     print("Generating Analysis Plots")
     print("=" * 80)
 
-    # Plot fusion comparison
-    fusion_file = experiment_path / "fusion_comparison.json"
-    if fusion_file.exists():
-        print("\n1. Fusion strategy comparison...")
-        with open(fusion_file) as f:
-            results = json.load(f)
-        plot_fusion_comparison(results, output_path / "fusion_comparison.png")
-    else:
-        print(
-            f"\nWarning: {fusion_file} not found. Skipping fusion comparison plot."
-        )
+    subdirs = sorted(
+        d for d in experiment_path.iterdir() if d.is_dir() and d.name
+    )
 
-    # Plot missing modality robustness
-    missing_file = experiment_path / "missing_modality.json"
-    if missing_file.exists():
-        print("\n2. Missing modality robustness...")
-        with open(missing_file) as f:
-            results = json.load(f)
-        plot_missing_modality_robustness(
-            results, output_path / "missing_modality.png"
-        )
-    else:
-        print(
-            f"\nWarning: {missing_file} not found. Skipping missing modality plot."
-        )
+    if not subdirs:
+        print(f"No subdirectories found in {experiment_path}, nothing to plot.")
+        return
 
-    # Note: Attention and calibration plots require model outputs
-    # Students should call these functions directly with their data
+    for idx, subdir in enumerate(subdirs, start=1):
+        fusion_name = subdir.name
+        print(f"\n[{idx}/{len(subdirs)}] Fusion type: {fusion_name}")
+        fusion_output = output_path / fusion_name
+        fusion_output.mkdir(parents=True, exist_ok=True)
+
+        fusion_file = subdir / "fusion_comparison.json"
+        if fusion_file.exists():
+            print("  Generating fusion comparison plot...")
+            with open(fusion_file) as f:
+                results = json.load(f)
+            plot_fusion_comparison(
+                results, fusion_output / "fusion_comparison.png"
+            )
+        else:
+            print(
+                f"  Warning: {fusion_file} not found. Skipping fusion comparison."
+            )
+
+        missing_file = subdir / "missing_modality.json"
+        if missing_file.exists():
+            print("  Generating missing modality plot...")
+            with open(missing_file) as f:
+                results = json.load(f)
+            plot_missing_modality_robustness(
+                results, fusion_output / "missing_modality.png"
+            )
+        else:
+            print(
+                f"  Warning: {missing_file} not found. Skipping missing modality plot."
+            )
 
     print("\n" + "=" * 80)
     print("Plot generation complete!")
     print(f"Plots saved to: {output_path}")
     print("=" * 80)
-
-    print("\nNote: To generate attention and calibration plots, call:")
-    print("  - plot_attention_weights(attention_matrix, modality_names)")
-    print("  - plot_calibration_diagram(confidences, predictions, labels)")
 
 
 def main():
