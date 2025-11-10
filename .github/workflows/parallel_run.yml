@@ -15,20 +15,20 @@ jobs:
         fusion: [early, late, hybrid]
 
     steps:
-      - name: Checkout repository - around 25s
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up uv (cold start, no caching) - around 2s
+      - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
           activate-environment: "true"
-          enable-cache: "false"
-          restore-cache: "false"
-          save-cache: "false"
-          cache-python: "false"
+          enable-cache: "true"
+          restore-cache: "true"
+          save-cache: "true"
+          cache-python: "true"
 
-      - name: Sync dependencies - around 35s
+      - name: Sync dependencies
         run: uv sync
 
       - name: Train ${{ matrix.fusion }} fusion for 5 epochs
