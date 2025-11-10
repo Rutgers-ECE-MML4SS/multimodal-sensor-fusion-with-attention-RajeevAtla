@@ -64,7 +64,7 @@ jobs:
           )
           OUT_DIR="experiments/${FUSION}"
           mkdir -p "${OUT_DIR}"
-          uv run python src/eval.py --checkpoint "${BEST_CKPT}" --output_dir "${OUT_DIR}" --device cpu --missing_modality_test
+          uv run python src/eval.py --checkpoint "${BEST_CKPT}" --output_dir "${OUT_DIR}" --device cpu --missing_modality_test --analysis_dir analysis/${FUSION}
 
       - name: Run uncertainty diagnostics
         run: |
@@ -75,32 +75,14 @@ jobs:
         run: |
           uv run python src/analysis.py --experiment_dir experiments --output_dir analysis
 
-      - name: Commit artifacts for ${{ matrix.fusion }}
-        if: github.event_name != 'pull_request'
-        env:
-          FUSION: ${{ matrix.fusion }}
-          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout "${BRANCH_NAME}"
-          git pull --ff-only origin "${BRANCH_NAME}"
-          if [ -d "runs/a2_${FUSION}_pamap2" ]; then
-            git add "runs/a2_${FUSION}_pamap2"
-          fi
-          if [ -d "experiments/${FUSION}" ]; then
-            git add "experiments/${FUSION}"
-          fi
-          if [ -d analysis ]; then
-            git add analysis
-          fi
-          if git diff --staged --quiet; then
-            echo "No artifact changes to commit for ${FUSION}"
-            exit 0
-          fi
-          git commit -m "ci: add ${FUSION} artifacts"
-          git push origin "${BRANCH_NAME}"
+      - name: Upload artifacts for ${{ matrix.fusion }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fusion-${{ matrix.fusion }}
+          path: |
+            runs/a2_${{ matrix.fusion }}_pamap2
+            experiments/${{ matrix.fusion }}
+            analysis
 
   fusion-summary:
     runs-on: ubuntu-latest
@@ -111,6 +93,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Download fusion artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fusion-*
+          merge-multiple: true
       - name: Aggregate fusion metrics
         run: |
           set -euo pipefail
@@ -137,7 +124,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout "${{ github.head_ref || github.ref_name }}"
           git pull --ff-only origin "${{ github.head_ref || github.ref_name }}"
-          git add experiments/fusion_comparison.json
-          git commit -m "ci: update fusion comparison" || echo "No changes to commit"
+          git add runs
+          git add experiments
+          git add analysis
+          git commit -m "ci: update fusion artifacts" || echo "No changes to commit"
           git push origin "${{ github.head_ref || github.ref_name }}"
           
