@@ -10,6 +10,8 @@ on:
 jobs:
   run-fusion-parallel:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       matrix:
         fusion: [early, late, hybrid]
@@ -17,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
@@ -57,4 +61,29 @@ jobs:
         if: matrix.fusion == 'hybrid'
         run: |
           uv run python src/analysis.py --experiment_dir experiments --output_dir analysis
+
+      - name: Commit artifacts for ${{ matrix.fusion }}
+        if: github.event_name != 'pull_request'
+        env:
+          FUSION: ${{ matrix.fusion }}
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout "${BRANCH_NAME}"
+          git pull --ff-only origin "${BRANCH_NAME}"
+          if [ -d "runs/a2_${FUSION}_pamap2" ]; then
+            git add "runs/a2_${FUSION}_pamap2"
+          fi
+          if [ "${FUSION}" = "hybrid" ]; then
+            [ -d experiments ] && git add experiments
+            [ -d analysis ] && git add analysis
+          fi
+          if git diff --staged --quiet; then
+            echo "No artifact changes to commit for ${FUSION}"
+            exit 0
+          fi
+          git commit -m "ci: add ${FUSION} artifacts"
+          git push origin "${BRANCH_NAME}"
           
