@@ -17,6 +17,7 @@ import argparse
 from tqdm import tqdm
 import itertools
 from typing import Any
+from collections.abc import Mapping, Sequence
 
 from omegaconf import DictConfig
 
@@ -112,6 +113,39 @@ def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
         return metrics
 
 
+def _parse_latency_batch(
+    batch: Any,
+) -> tuple[dict[str, torch.Tensor], torch.Tensor | None, torch.Tensor | None] | None:
+    """Best-effort parsing of batches for latency measurement."""
+    if isinstance(batch, Mapping):
+        features = dict(batch)
+        return features, None, None
+
+    if isinstance(batch, Sequence) and batch:
+        first = batch[0]
+        if isinstance(first, Mapping):
+            features = dict(first)
+            labels = batch[1] if len(batch) > 1 else None
+            mask = batch[2] if len(batch) > 2 else None
+            return features, labels, mask
+
+    return None
+
+
+def _infer_batch_size(
+    labels: Any, features: Mapping[str, torch.Tensor]
+) -> int | None:
+    """Infer batch size from labels or feature tensors."""
+    if hasattr(labels, "shape"):
+        return int(labels.shape[0])
+
+    for tensor in features.values():
+        if hasattr(tensor, "shape"):
+            return int(tensor.shape[0])
+
+    return None
+
+
 def measure_inference_latency(model, dataloader, device="cpu") -> tuple[float, float]:
     """
     Measure per-sample inference latency statistics (mean/std in ms).
@@ -130,14 +164,42 @@ def measure_inference_latency(model, dataloader, device="cpu") -> tuple[float, f
     per_sample_ms: list[float] = []
 
     with torch.no_grad():
-        for features, labels, mask in dataloader:
+        for batch in dataloader:
+            parsed = _parse_latency_batch(batch)
+            if parsed is None:
+                print("  Warning: Unable to parse batch for latency measurement, skipping.")
+                continue
+
+            features, labels, mask = parsed
+            batch_size = _infer_batch_size(labels, features)
+            if batch_size is None or batch_size == 0:
+                print("  Warning: Unable to infer batch size for latency measurement, skipping.")
+                continue
+
+            if not features:
+                print("  Warning: Empty feature dict encountered during latency measurement, skipping.")
+                continue
+
+            try:
+                features = {k: v.to(device) for k, v in features.items()}
+            except AttributeError:
+                print("  Warning: Non-tensor feature encountered, skipping batch for latency measurement.")
+                continue
+
+            if mask is None:
+                mask = torch.ones(
+                    batch_size,
+                    max(1, len(features)),
+                    device=device,
+                    dtype=next(iter(features.values())).dtype,
+                )
+            else:
+                mask = mask.to(device)
+
             batch_start = time.perf_counter()
-            features = {k: v.to(device) for k, v in features.items()}
-            model(features, mask.to(device))
+            model(features, mask)
             elapsed = time.perf_counter() - batch_start
-            batch_size = labels.size(0)
-            if batch_size > 0:
-                per_sample_ms.append((elapsed / batch_size) * 1000.0)
+            per_sample_ms.append((elapsed / batch_size) * 1000.0)
 
     if not per_sample_ms:
         return 0.0, 0.0

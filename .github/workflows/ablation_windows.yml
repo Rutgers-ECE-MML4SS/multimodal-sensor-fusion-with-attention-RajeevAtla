@@ -1,0 +1,89 @@
+name: ablation-windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  window-sweep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        chunk: [256, 512, 1024]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          activate-environment: "true"
+          enable-cache: "true"
+          restore-cache: "true"
+          save-cache: "true"
+          cache-python: "true"
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Train hybrid fusion (chunk=${{ matrix.chunk }})
+        env:
+          HYDRA_FULL_ERROR: "1"
+        run: |
+          echo "Training hybrid fusion with chunk_size=${{ matrix.chunk }}"
+          uv run python src/train.py \
+            model.fusion_type=hybrid \
+            dataset.chunk_size=${{ matrix.chunk }} \
+            training.max_epochs=15 \
+            experiment.name=a2_hybrid_chunk${{ matrix.chunk }}
+
+      - name: Evaluate checkpoint (chunk=${{ matrix.chunk }})
+        env:
+          CHUNK: ${{ matrix.chunk }}
+        run: |
+          set -euo pipefail
+          RESULTS_FILE="runs/a2_hybrid_chunk${CHUNK}/results.json"
+          CKPT=$(python - <<'PY'
+          import json, os
+          from pathlib import Path
+          results = Path(os.environ["RESULTS_FILE"])
+          data = json.load(results.open())
+          print(data["best_model_path"])
+          PY
+          )
+          OUT_DIR="experiments/chunk_${CHUNK}"
+          mkdir -p "${OUT_DIR}"
+          uv run python src/eval.py --checkpoint "${CKPT}" --output_dir "${OUT_DIR}" --device cpu --missing_modality_test
+
+      - name: Generate plots (chunk=${{ matrix.chunk }})
+        run: |
+          uv run python src/analysis.py --experiment_dir experiments --output_dir analysis_chunk
+
+      - name: Commit artifacts (chunk=${{ matrix.chunk }})
+        if: github.event_name != 'pull_request'
+        env:
+          CHUNK: ${{ matrix.chunk }}
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout "${BRANCH_NAME}"
+          git pull --ff-only origin "${BRANCH_NAME}"
+          [ -d "runs/a2_hybrid_chunk${CHUNK}" ] && git add "runs/a2_hybrid_chunk${CHUNK}"
+          [ -d "experiments/chunk_${CHUNK}" ] && git add "experiments/chunk_${CHUNK}"
+          [ -d analysis_chunk ] && git add analysis_chunk
+          if git diff --staged --quiet; then
+            echo "No artifact changes to commit for chunk=${CHUNK}"
+            exit 0
+          fi
+          git commit -m "ci: add chunk ${CHUNK} artifacts"
+          git push origin "${BRANCH_NAME}"

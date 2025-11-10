@@ -348,11 +348,38 @@ def plot_calibration_diagram(
     plt.close()
 
 
+def _process_experiment_dir(
+    source_dir: Path, destination_dir: Path
+) -> None:
+    """Generate plots for a single experiment directory."""
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    fusion_file = source_dir / "fusion_comparison.json"
+    if fusion_file.exists():
+        print("  Generating fusion comparison plot...")
+        with open(fusion_file) as f:
+            results = json.load(f)
+        plot_fusion_comparison(results, destination_dir / "fusion_comparison.png")
+    else:
+        print(f"  Warning: {fusion_file} not found. Skipping fusion comparison.")
+
+    missing_file = source_dir / "missing_modality.json"
+    if missing_file.exists():
+        print("  Generating missing modality plot...")
+        with open(missing_file) as f:
+            results = json.load(f)
+        plot_missing_modality_robustness(
+            results, destination_dir / "missing_modality.png"
+        )
+    else:
+        print(f"  Warning: {missing_file} not found. Skipping missing modality plot.")
+
+
 def generate_all_plots(
     experiment_dir: Path | str, output_dir: Path | str
 ) -> None:
     """
-    Generate plots for each fusion type under experiments/<fusion>/.
+    Generate plots for each fusion type or for the provided experiment directory.
     """
     experiment_path = Path(experiment_dir)
     output_path = Path(output_dir)
@@ -365,42 +392,27 @@ def generate_all_plots(
     subdirs = sorted(
         d for d in experiment_path.iterdir() if d.is_dir() and d.name
     )
+    root_has_json = any(
+        (experiment_path / name).is_file()
+        for name in ("fusion_comparison.json", "missing_modality.json")
+    )
 
-    if not subdirs:
-        print(f"No subdirectories found in {experiment_path}, nothing to plot.")
+    process_root = root_has_json or not subdirs
+
+    tasks: list[tuple[Path, Path, str]] = []
+    if process_root:
+        tasks.append((experiment_path, output_path, experiment_path.name or "root"))
+
+    for subdir in subdirs:
+        tasks.append((subdir, output_path / subdir.name, subdir.name))
+
+    if not tasks:
+        print(f"No experiment data found in {experiment_path}, nothing to plot.")
         return
 
-    for idx, subdir in enumerate(subdirs, start=1):
-        fusion_name = subdir.name
-        print(f"\n[{idx}/{len(subdirs)}] Fusion type: {fusion_name}")
-        fusion_output = output_path / fusion_name
-        fusion_output.mkdir(parents=True, exist_ok=True)
-
-        fusion_file = subdir / "fusion_comparison.json"
-        if fusion_file.exists():
-            print("  Generating fusion comparison plot...")
-            with open(fusion_file) as f:
-                results = json.load(f)
-            plot_fusion_comparison(
-                results, fusion_output / "fusion_comparison.png"
-            )
-        else:
-            print(
-                f"  Warning: {fusion_file} not found. Skipping fusion comparison."
-            )
-
-        missing_file = subdir / "missing_modality.json"
-        if missing_file.exists():
-            print("  Generating missing modality plot...")
-            with open(missing_file) as f:
-                results = json.load(f)
-            plot_missing_modality_robustness(
-                results, fusion_output / "missing_modality.png"
-            )
-        else:
-            print(
-                f"  Warning: {missing_file} not found. Skipping missing modality plot."
-            )
+    for idx, (src_dir, dest_dir, label) in enumerate(tasks, start=1):
+        print(f"\n[{idx}/{len(tasks)}] Processing: {label}")
+        _process_experiment_dir(src_dir, dest_dir)
 
     print("\n" + "=" * 80)
     print("Plot generation complete!")
