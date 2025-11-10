@@ -1,6 +1,6 @@
 {
-  "best_model_path": "/home/runner/work/multimodal-sensor-fusion-with-attention-RajeevAtla/multimodal-sensor-fusion-with-attention-RajeevAtla/runs/a2_hybrid_pamap2/checkpoints/epoch=8-val/loss=1.3278.ckpt",
-  "best_val_loss": 1.3278263807296753,
+  "best_model_path": "/home/runner/work/multimodal-sensor-fusion-with-attention-RajeevAtla/multimodal-sensor-fusion-with-attention-RajeevAtla/runs/a2_hybrid_pamap2/checkpoints/epoch=9-val/loss=1.2280.ckpt",
+  "best_val_loss": 1.2279994487762451,
   "config": {
     "dataset": {
       "name": "pamap2",
@@ -71,7 +71,7 @@
       }
     },
     "training": {
-      "max_epochs": 10,
+      "max_epochs": 20,
       "learning_rate": 0.001,
       "weight_decay": 0.0001,
       "optimizer": "adamw",
