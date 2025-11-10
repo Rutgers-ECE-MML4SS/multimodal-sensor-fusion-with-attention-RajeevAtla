@@ -35,12 +35,12 @@ jobs:
       - name: Sync dependencies
         run: uv sync
 
-      - name: Train ${{ matrix.fusion }} fusion for 20 epochs
+      - name: Train ${{ matrix.fusion }} fusion for 15 epochs
         env:
           HYDRA_FULL_ERROR: "1"
         run: |
-          echo "Running ${{ matrix.fusion }} fusion for 20 epochs"
-          uv run python src/train.py model.fusion_type=${{ matrix.fusion }} training.max_epochs=20
+          echo "Running ${{ matrix.fusion }} fusion for 15 epochs"
+          uv run python src/train.py model.fusion_type=${{ matrix.fusion }} training.max_epochs=15
 
       - name: Evaluate hybrid checkpoint to produce JSON summaries
         run: |
