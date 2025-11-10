@@ -35,30 +35,37 @@ jobs:
       - name: Sync dependencies
         run: uv sync
 
-      - name: Train ${{ matrix.fusion }} fusion for 10 epochs
+      - name: Train ${{ matrix.fusion }} fusion for 20 epochs
         env:
           HYDRA_FULL_ERROR: "1"
         run: |
-          echo "Running ${{ matrix.fusion }} fusion for 10 epochs"
-          uv run python src/train.py model.fusion_type=${{ matrix.fusion }} training.max_epochs=10
+          echo "Running ${{ matrix.fusion }} fusion for 20 epochs"
+          uv run python src/train.py model.fusion_type=${{ matrix.fusion }} training.max_epochs=20
 
       - name: Evaluate hybrid checkpoint to produce JSON summaries
-        if: matrix.fusion == 'hybrid'
         run: |
           set -euo pipefail
-          BEST_CKPT=$(python - <<'PY'
+          FUSION="${{ matrix.fusion }}"
+          FUSION_DIR="runs/a2_${FUSION}_pamap2"
+          RESULTS_FILE="${FUSION_DIR}/results.json"
+          if [ ! -f "${RESULTS_FILE}" ]; then
+            echo "Missing ${RESULTS_FILE}"
+            exit 1
+          fi
+          BEST_CKPT=$(python - <<PY
           import json
           from pathlib import Path
           
-          results_path = Path("runs") / "a2_hybrid_pamap2" / "results.json"
-          data = json.load(results_path.open())
+          path = Path("${RESULTS_FILE}")
+          data = json.load(path.open())
           print(data["best_model_path"])
           PY
-                    )
-          uv run python src/eval.py --checkpoint "${BEST_CKPT}" --output_dir experiments --device cpu --missing_modality_test
+          )
+          OUT_DIR="experiments/${FUSION}"
+          mkdir -p "${OUT_DIR}"
+          uv run python src/eval.py --checkpoint "${BEST_CKPT}" --output_dir "${OUT_DIR}" --device cpu --missing_modality_test
 
       - name: Generate analysis plots
-        if: matrix.fusion == 'hybrid'
         run: |
           uv run python src/analysis.py --experiment_dir experiments --output_dir analysis
 
@@ -76,9 +83,11 @@ jobs:
           if [ -d "runs/a2_${FUSION}_pamap2" ]; then
             git add "runs/a2_${FUSION}_pamap2"
           fi
-          if [ "${FUSION}" = "hybrid" ]; then
-            [ -d experiments ] && git add experiments
-            [ -d analysis ] && git add analysis
+          if [ -d "experiments/${FUSION}" ]; then
+            git add "experiments/${FUSION}"
+          fi
+          if [ -d analysis ]; then
+            git add analysis
           fi
           if git diff --staged --quiet; then
             echo "No artifact changes to commit for ${FUSION}"
