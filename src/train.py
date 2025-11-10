@@ -7,6 +7,8 @@ Most infrastructure is provided - students need to integrate their fusion models
 
 import copy
 import os
+import platform
+import shutil
 import warnings
 import torch
 import torch.nn as nn
@@ -122,6 +124,14 @@ def _compile_with_cache(
     return compiled
 
 
+def _compile_supported() -> bool:
+    """Return True when torch.compile has the required toolchain."""
+
+    if platform.system().lower() != "windows":
+        return True
+    return shutil.which("cl.exe") is not None
+
+
 class MultimodalFusionModule(pl.LightningModule):
     """
     PyTorch Lightning module for multimodal fusion training.
@@ -194,6 +204,13 @@ class MultimodalFusionModule(pl.LightningModule):
         """Compile encoders and fusion modules when torch.compile is available."""
 
         if not bool(self.config.training.get("enable_compile", True)):
+            return
+        if not _compile_supported():
+            warnings.warn(
+                "torch.compile requires the Visual Studio C++ build tools on Windows; "
+                "falling back to eager mode.",
+                RuntimeWarning,
+            )
             return
 
         compile_fn = getattr(torch, "compile", None)
