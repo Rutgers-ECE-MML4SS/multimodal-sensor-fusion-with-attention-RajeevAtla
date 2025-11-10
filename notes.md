@@ -28,10 +28,14 @@
 ## running (github actions)
 - gh actions gives a pretty slim image - 16 gb ram, 2 vcpu cores (ubuntu-latest)
 - can reduce further - 5 gb ram, 1 vcpu (ubuntu-slim); max execution time is 15 minutes however
-- `complete_run.yml` now runs a quick fusion sweep (early/late/hybrid, 5 epochs each) via `uv run python src/train.py model.fusion_type=<type> training.max_epochs=5` to validate all heads without blowing the time budget.
-- Lightning’s `configure_gradient_clipping` hook was updated to accept optional `optimizer_idx`/clip args, matching the latest API so CI runs don’t crash when clipping is enabled.
+- `complete_run.yml` now runs a quick fusion sweep (early/late/hybrid, 5 epochs each) via `uv run python src/train.py model.fusion_type=<type> training.max_epochs=5` to validate all heads without blowing the time budget, then calls `src/eval.py` and `src/analysis.py` so `experiments/*.json` and `analysis/*.png` are always emitted as part of the job.
+- `parallel_run.yml` mirrors the sweep but through a fusion matrix; only the hybrid leg runs the evaluation/analysis steps so artifacts don’t get duplicated.
+- Evaluation step looks up the best hybrid checkpoint from `runs/a2_hybrid_pamap2/results.json` (Lightning writes the path there) before invoking `src/eval.py` with `--missing_modality_test`.
+- Analysis step simply points `src/analysis.py` at the freshly written `experiments/` directory; make sure any custom experiment JSONs land there if you extend the workflow.
+- Lightning's `configure_gradient_clipping` hook was updated to accept optional `optimizer_idx`/clip args, matching the latest API so CI runs don't crash when clipping is enabled.
 - `build_fusion_model` strips hybrid-only kwargs (e.g., `num_heads`) before instantiating Early/Late fusion, keeping a single Hydra config compatible with every architecture.
 - Training perf knobs:
   - `training.gradient_accumulation` emulates larger batches even when manifest chunks stay at batch_size=1.
   - Torch threading gets clamped to the 4-core GitHub runner via `_configure_torch_threads`, and `torch.compile` is enabled with a tiny LRU cache so successive runs reuse compiled graphs.
-  - `model.modality_fold_size` lets you process modalities in smaller folds without altering fusion architectures (set `0` to keep the legacy “all at once” behavior).
+  - `model.modality_fold_size` lets you process modalities in smaller folds without altering fusion architectures (set `0` to keep the legacy "all at once" behavior).
+- On Windows runners there’s no MSVC toolchain, so `_maybe_compile_modules` now auto-detects that and skips `torch.compile`; Linux/CI builds still use the compiler cache.
