@@ -166,8 +166,7 @@ class SequenceEncoder(nn.Module):
             return encoding
 
         if self.encoder_type == "cnn":
-            x = sequence.transpose(1, 2).contiguous()
-            # Conv1d expects channel-first contiguous tensors; torch.compile enforces strides
+            x = sequence.transpose(1, 2)  # (batch, input_dim, seq_len)
             if self.conv_net is None or self.pool is None:
                 raise RuntimeError("CNN modules not initialized.")
             x = self.conv_net(x)
