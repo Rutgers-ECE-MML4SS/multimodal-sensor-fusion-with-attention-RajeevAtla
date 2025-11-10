@@ -13,26 +13,6 @@ import torch
 import torch.nn as nn
 
 
-class _CNNEncoderStack(nn.Module):
-    """Two-layer Conv1d stack that enforces contiguous inputs for torch.compile."""
-
-    def __init__(self, input_dim: int, hidden_dim: int) -> None:
-        super().__init__()
-        self.conv1 = nn.Conv1d(input_dim, hidden_dim, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm1d(hidden_dim)
-        self.act1 = nn.ReLU()
-        self.conv2 = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm1d(hidden_dim)
-        self.act2 = nn.ReLU()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv1(x.contiguous())
-        x = self.act1(self.bn1(x))
-        x = self.conv2(x.contiguous())
-        x = self.act2(self.bn2(x))
-        return x
-
-
 class SequenceEncoder(nn.Module):
     """
     Encoder for sequential/time-series sensor data.
@@ -105,7 +85,14 @@ class SequenceEncoder(nn.Module):
             self.projection = nn.Linear(hidden_dim, output_dim)
 
         elif encoder_type == "cnn":
-            cast_self.conv_net = _CNNEncoderStack(input_dim, hidden_dim)
+            cast_self.conv_net = nn.Sequential(
+                nn.Conv1d(input_dim, hidden_dim, kernel_size=3, padding=1),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+            )
             cast_self.pool = nn.AdaptiveAvgPool1d(1)
             self.projection = nn.Linear(hidden_dim, output_dim)
 
@@ -179,7 +166,10 @@ class SequenceEncoder(nn.Module):
             return encoding
 
         if self.encoder_type == "cnn":
-            x = sequence.transpose(1, 2).contiguous()
+            # ``reshape`` after permute forces a contiguous layout for torch.compile guards
+            x = sequence.transpose(1, 2).reshape(
+                batch_size, sequence.size(2), seq_len
+            )
             if self.conv_net is None or self.pool is None:
                 raise RuntimeError("CNN modules not initialized.")
             x = self.conv_net(x)
