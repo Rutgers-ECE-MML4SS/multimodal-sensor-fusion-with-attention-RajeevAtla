@@ -25,8 +25,8 @@ dataset:
 # Model configuration
 model:
   fusion_type: hybrid  # Options: early, late, hybrid, uncertainty
-  hidden_dim: 192
-  output_dim: 256  # Encoder output dimension
+  hidden_dim: 256
+  output_dim: 128  # Encoder output dimension
   num_heads: 4  # For attention mechanisms
   dropout: 0.1
   layer_norm: true
