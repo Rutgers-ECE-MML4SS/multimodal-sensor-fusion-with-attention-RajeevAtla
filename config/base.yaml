@@ -71,7 +71,6 @@ training:
   weight_decay: 1e-4
   optimizer: adamw
   scheduler: cosine
-  warmup_epochs: 5
   gradient_clip_norm: 1.0
   gradient_accumulation: 4
   enable_compile: true
