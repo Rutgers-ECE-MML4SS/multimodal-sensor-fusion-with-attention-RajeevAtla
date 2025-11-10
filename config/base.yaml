@@ -37,22 +37,22 @@ model:
     imu_hand:
       type: sequence
       input_dim: 17
-      encoder_type: cnn
+      encoder_type: lstm
       num_layers: 1
     imu_chest:
       type: sequence
       input_dim: 17
-      encoder_type: cnn
+      encoder_type: lstm
       num_layers: 1
     imu_ankle:
       type: sequence
       input_dim: 17
-      encoder_type: cnn
+      encoder_type: lstm
       num_layers: 1
     heart_rate:
       type: sequence
       input_dim: 1
-      encoder_type: cnn
+      encoder_type: lstm
       num_layers: 1
     video:
       type: frame  # frame, sequence, or mlp
