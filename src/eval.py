@@ -7,22 +7,22 @@ Provides framework for:
 - Generating results for experiments/ directory
 """
 
+import argparse
+import itertools
+import json
 import time
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
-from pathlib import Path
-import json
-import argparse
-from tqdm import tqdm
-import itertools
-from typing import Any
-from collections.abc import Mapping, Sequence
-
 from omegaconf import DictConfig
+from tqdm import tqdm
 
-from train import MultimodalFusionModule
 from data import create_dataloaders
+from train import MultimodalFusionModule
 from uncertainty import CalibrationMetrics
 
 
@@ -56,6 +56,7 @@ def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
     all_preds = []
     all_labels = []
     all_confidences = []
+    all_logits = []
     total_loss = 0
     num_batches = 0
 
@@ -70,6 +71,7 @@ def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
 
             # Forward pass
             logits = model(features, mask)
+            all_logits.append(logits.cpu())
 
             # Compute loss
             loss = F.cross_entropy(logits, labels)
@@ -88,6 +90,7 @@ def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
     all_preds = torch.cat(all_preds)
     all_labels = torch.cat(all_labels)
     all_confidences = torch.cat(all_confidences)
+    all_logits = torch.cat(all_logits)
 
     # Compute metrics
     accuracy = (all_preds == all_labels).float().mean().item()
@@ -108,7 +111,7 @@ def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
     }
 
     if return_predictions:
-        return metrics, (all_preds, all_labels, all_confidences)
+        return metrics, (all_preds, all_labels, all_confidences, all_logits)
     else:
         return metrics
 
@@ -205,6 +208,87 @@ def measure_inference_latency(model, dataloader, device="cpu") -> tuple[float, f
         return 0.0, 0.0
     arr = np.asarray(per_sample_ms, dtype=np.float64)
     return float(arr.mean()), float(arr.std(ddof=0))
+
+
+def generate_attention_visualization(
+    model: MultimodalFusionModule,
+    dataloader: torch.utils.data.DataLoader,
+    modality_names: Sequence[str],
+    save_path: Path,
+    device: str,
+) -> Path | None:
+    """
+    Generate an attention heatmap for the hybrid fusion model.
+    """
+    if not modality_names:
+        return None
+
+    if model.config.model.fusion_type != "hybrid":
+        return None
+
+    data_iter = iter(dataloader)
+    try:
+        features, _, mask = next(data_iter)
+    except StopIteration:
+        return None
+
+    features = {k: v.to(device) for k, v in features.items()}
+    mask = mask.to(device)
+
+    with torch.no_grad():
+        try:
+            _, attention_info = model(features, mask, return_attention=True)
+        except ValueError:
+            return None
+
+    attention_maps = attention_info.get("attention_maps", {})
+    if not attention_maps:
+        return None
+
+    num_modalities = len(modality_names)
+    matrix = np.zeros((num_modalities, num_modalities), dtype=np.float32)
+    counts = np.zeros_like(matrix)
+
+    for key, weights in attention_maps.items():
+        if "_to_" not in key:
+            continue
+        query_mod, key_mod = key.split("_to_", 1)
+        if (
+            query_mod not in modality_names
+            or key_mod not in modality_names
+        ):
+            continue
+        q_idx = modality_names.index(query_mod)
+        k_idx = modality_names.index(key_mod)
+        scalar = weights.detach().float().mean().item()
+        matrix[q_idx, k_idx] += scalar
+        counts[q_idx, k_idx] += 1
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        matrix = np.divide(
+            matrix,
+            np.where(counts == 0, 1.0, counts),
+            out=np.zeros_like(matrix),
+            where=counts != 0,
+        )
+
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(matrix, cmap="magma", aspect="equal")
+    ax.set_xticks(range(num_modalities))
+    ax.set_yticks(range(num_modalities))
+    ax.set_xticklabels(modality_names, rotation=45, ha="right")
+    ax.set_yticklabels(modality_names)
+    ax.set_xlabel("Key Modality")
+    ax.set_ylabel("Query Modality")
+    ax.set_title("Cross-Modal Attention Heatmap")
+    fig.colorbar(im, ax=ax, shrink=0.8)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=300)
+    plt.close(fig)
+    return save_path
 
 
 def evaluate_missing_modalities(
@@ -387,6 +471,12 @@ def main():
         help="Directory to save results",
     )
     parser.add_argument(
+        "--analysis_dir",
+        type=str,
+        default="analysis",
+        help="Directory to save calibration plots",
+    )
+    parser.add_argument(
         "--missing_modality_test",
         action="store_true",
         help="Run missing modality robustness test",
@@ -427,7 +517,7 @@ def main():
     print("Standard Evaluation")
     print("=" * 80)
 
-    metrics, (preds, labels, confidences) = evaluate_model(
+    metrics, (preds, labels, confidences, logits) = evaluate_model(
         model, test_loader, args.device, return_predictions=True
     )
 
@@ -440,7 +530,38 @@ def main():
     ece = CalibrationMetrics.expected_calibration_error(
         confidences, preds, labels
     )
+    mce = CalibrationMetrics.maximum_calibration_error(
+        confidences, preds, labels
+    )
+    nll = CalibrationMetrics.negative_log_likelihood(logits, labels)
     print(f"ECE: {ece:.4f}")
+    print(f"MCE: {mce:.4f}")
+    print(f"NLL: {nll:.4f}")
+
+    num_bins = int(
+        _cfg_get(config.evaluation, "num_calibration_bins", 15)
+    )
+    analysis_root = Path(args.analysis_dir) / config.model.fusion_type
+    analysis_root.mkdir(parents=True, exist_ok=True)
+    calibration_plot = analysis_root / "calibration.png"
+    CalibrationMetrics.reliability_diagram(
+        confidences.cpu().numpy(),
+        preds.cpu().numpy(),
+        labels.cpu().numpy(),
+        num_bins=num_bins,
+        save_path=calibration_plot,
+    )
+    attention_plot = None
+    if config.model.fusion_type == "hybrid":
+        attention_plot = generate_attention_visualization(
+            model,
+            test_loader,
+            list(config.dataset.modalities),
+            analysis_root / "attention_viz.png",
+            args.device,
+        )
+        if attention_plot is not None:
+            print(f"Attention visualization saved to: {attention_plot}")
 
     # Inference latency
     print("\nMeasuring inference latency...")
@@ -459,9 +580,13 @@ def main():
         "test_f1_macro": metrics["f1_macro"],
         "test_loss": metrics["loss"],
         "ece": ece,
+        "mce": mce,
+        "nll": nll,
         "inference_ms_mean": latency_mean_ms,
         "inference_ms_std": latency_std_ms,
     }
+    if attention_plot is not None:
+        standard_results["attention_plot"] = str(attention_plot)
 
     # Missing modality test
     if args.missing_modality_test:
@@ -493,8 +618,20 @@ def main():
         save_results_json(missing_results, output_path)
 
     # Save all results
-    output_path = Path(args.output_dir) / "evaluation_results.json"
-    save_results_json(standard_results, output_path)
+    eval_path = Path(args.output_dir) / "evaluation_results.json"
+    save_results_json(standard_results, eval_path)
+
+    uncertainty_results = {
+        "dataset": config.dataset.name,
+        "fusion_type": config.model.fusion_type,
+        "ece": ece,
+        "mce": mce,
+        "nll": nll,
+        "num_bins": num_bins,
+        "calibration_plot": str(calibration_plot),
+    }
+    uncertainty_path = Path(args.output_dir) / "uncertainty.json"
+    save_results_json(uncertainty_results, uncertainty_path)
 
     print("\nEvaluation complete!")
 

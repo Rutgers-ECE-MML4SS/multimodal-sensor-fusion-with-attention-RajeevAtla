@@ -1,0 +1,90 @@
+name: baseline-single-modality
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  single-modality:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        modality: [imu_hand, imu_chest, imu_ankle, heart_rate]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          activate-environment: "true"
+          enable-cache: "true"
+          restore-cache: "true"
+          save-cache: "true"
+          cache-python: "true"
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Train single-modality (${{ matrix.modality }})
+        env:
+          HYDRA_FULL_ERROR: "1"
+        run: |
+          MOD=${{ matrix.modality }}
+          echo "Training single-modality model for ${MOD}"
+          uv run python src/train.py \
+            model.fusion_type=early \
+            dataset.modalities=[${MOD}] \
+            training.max_epochs=10 \
+            experiment.name=a2_single_${MOD}
+
+      - name: Evaluate checkpoint (${{ matrix.modality }})
+        env:
+          MOD: ${{ matrix.modality }}
+        run: |
+          set -euo pipefail
+          RESULTS_FILE="runs/a2_single_${MOD}/results.json"
+          CKPT=$(python - <<'PY'
+          import json, os
+          from pathlib import Path
+          results = Path(os.environ["RESULTS_FILE"])
+          data = json.load(results.open())
+          print(data["best_model_path"])
+          PY
+          )
+          OUT_DIR="experiments/single_${MOD}"
+          mkdir -p "${OUT_DIR}"
+          uv run python src/eval.py --checkpoint "${CKPT}" --output_dir "${OUT_DIR}" --device cpu --analysis_dir analysis_single
+
+      - name: Generate plots (${{ matrix.modality }})
+        run: |
+          uv run python src/analysis.py --experiment_dir experiments --output_dir analysis_single
+
+      - name: Commit artifacts (${{ matrix.modality }})
+        if: github.event_name != 'pull_request'
+        env:
+          MOD: ${{ matrix.modality }}
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout "${BRANCH_NAME}"
+          git pull --ff-only origin "${BRANCH_NAME}"
+          [ -d "runs/a2_single_${MOD}" ] && git add "runs/a2_single_${MOD}"
+          [ -d "experiments/single_${MOD}" ] && git add "experiments/single_${MOD}"
+          [ -d analysis_single ] && git add analysis_single
+          if git diff --staged --quiet; then
+            echo "No artifact changes to commit for ${MOD}"
+            exit 0
+          fi
+          git commit -m "ci: add single-modality ${MOD} artifacts"
+          git push origin "${BRANCH_NAME}"

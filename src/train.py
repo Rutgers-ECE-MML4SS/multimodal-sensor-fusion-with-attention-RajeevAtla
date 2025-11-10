@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, cast
 from collections import OrderedDict
 
 from data import create_dataloaders
-from fusion import build_fusion_model
+from fusion import HybridFusion, build_fusion_model
 from encoders import build_encoder
 
 
@@ -230,17 +230,24 @@ class MultimodalFusionModule(pl.LightningModule):
                 RuntimeWarning,
             )
 
-    def forward(self, features, mask=None):
+    def forward(
+        self, features, mask=None, return_attention: bool = False
+    ):
         """
         Forward pass through encoders and fusion model.
 
         Args:
             features: Dict of {modality_name: features}
             mask: Optional modality availability mask
+            return_attention: If True (hybrid only), also return attention info
 
         Returns:
             logits: Class predictions
         """
+        if return_attention and not isinstance(self.fusion_model, HybridFusion):
+            raise ValueError(
+                "Attention information is only available for HybridFusion."
+            )
         # Encode each modality
         encoded_features = {}
         modality_order = list(self.encoders.keys())
@@ -264,16 +271,23 @@ class MultimodalFusionModule(pl.LightningModule):
         # Fusion
         # TODO: Students ensure their fusion model returns correct format
         # For late fusion, may return tuple (logits, per_modality_logits)
-        output = self.fusion_model(encoded_features, mask)
+        if return_attention:
+            output = self.fusion_model(
+                encoded_features, mask, return_attention=True
+            )
+        else:
+            output = self.fusion_model(encoded_features, mask)
 
         # Handle different fusion output formats
         if isinstance(output, tuple):
-            logits = output[
-                0
-            ]  # Late fusion returns (fused_logits, per_modality_logits)
+            logits = output[0]
+            aux_output = output[1] if len(output) > 1 else None
         else:
             logits = output
+            aux_output = None
 
+        if return_attention:
+            return logits, aux_output
         return logits
 
     def _log_metric(self, name: str, value: torch.Tensor, **kwargs: Any) -> None:
