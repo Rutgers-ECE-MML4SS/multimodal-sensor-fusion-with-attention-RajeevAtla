@@ -15,6 +15,7 @@ jobs:
     strategy:
       matrix:
         fusion: [early, late, hybrid]
+    needs: []
 
     steps:
       - name: Checkout repository
@@ -35,12 +36,12 @@ jobs:
       - name: Sync dependencies
         run: uv sync
 
-      - name: Train ${{ matrix.fusion }} fusion for 15 epochs
+      - name: Train ${{ matrix.fusion }} fusion for 10 epochs
         env:
           HYDRA_FULL_ERROR: "1"
         run: |
-          echo "Running ${{ matrix.fusion }} fusion for 15 epochs"
-          uv run python src/train.py model.fusion_type=${{ matrix.fusion }} training.max_epochs=15
+          echo "Running ${{ matrix.fusion }} fusion for 10 epochs"
+          uv run python src/train.py model.fusion_type=${{ matrix.fusion }} training.max_epochs=10
 
       - name: Evaluate hybrid checkpoint to produce JSON summaries
         run: |
@@ -64,6 +65,11 @@ jobs:
           OUT_DIR="experiments/${FUSION}"
           mkdir -p "${OUT_DIR}"
           uv run python src/eval.py --checkpoint "${BEST_CKPT}" --output_dir "${OUT_DIR}" --device cpu --missing_modality_test
+
+      - name: Run uncertainty diagnostics
+        run: |
+          mkdir -p analysis/${{ matrix.fusion }}
+          uv run python src/uncertainty.py --save_path analysis/${{ matrix.fusion }}/calibration.png
 
       - name: Generate analysis plots
         run: |
@@ -95,4 +101,43 @@ jobs:
           fi
           git commit -m "ci: add ${FUSION} artifacts"
           git push origin "${BRANCH_NAME}"
+
+  fusion-summary:
+    runs-on: ubuntu-latest
+    needs: run-fusion-parallel
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Aggregate fusion metrics
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          
+          base = Path("experiments")
+          results = {"results": {}}
+          for fusion_dir in sorted(base.iterdir()):
+              eval_file = fusion_dir / "evaluation_results.json"
+              if not eval_file.exists():
+                  continue
+              metrics = json.load(eval_file.open())
+              results["results"][fusion_dir.name] = metrics
+          
+          fusion_file = base / "fusion_comparison.json"
+          fusion_file.write_text(json.dumps(results, indent=2))
+          PY
+      - name: Commit summary artifacts
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout "${{ github.head_ref || github.ref_name }}"
+          git pull --ff-only origin "${{ github.head_ref || github.ref_name }}"
+          git add experiments/fusion_comparison.json
+          git commit -m "ci: update fusion comparison" || echo "No changes to commit"
+          git push origin "${{ github.head_ref || github.ref_name }}"
           

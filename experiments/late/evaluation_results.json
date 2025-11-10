@@ -1,8 +1,1 @@
-{
-  "dataset": "pamap2",
-  "fusion_type": "late",
-  "test_accuracy": 0.7816901206970215,
-  "test_f1_macro": 0.717837636585368,
-  "test_loss": 0.8144040752766313,
-  "ece": 0.11229073256254196
-}
+{"dataset": "pamap2", "fusion_type": "late", "test_accuracy": 0.7816901206970215, "test_f1_macro": 0.717837636585368, "test_loss": 0.8144040752766313, "ece": 0.11229073256254196, "inference_ms_mean": 1}
