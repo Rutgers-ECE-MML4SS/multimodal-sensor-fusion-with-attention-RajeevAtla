@@ -37,4 +37,24 @@ jobs:
         run: |
           echo "Running ${{ matrix.fusion }} fusion for 10 epochs"
           uv run python src/train.py model.fusion_type=${{ matrix.fusion }} training.max_epochs=10
+
+      - name: Evaluate hybrid checkpoint to produce JSON summaries
+        if: matrix.fusion == 'hybrid'
+        run: |
+          set -euo pipefail
+          BEST_CKPT=$(python - <<'PY'
+import json
+from pathlib import Path
+
+results_path = Path("runs") / "a2_hybrid_pamap2" / "results.json"
+data = json.load(results_path.open())
+print(data["best_model_path"])
+PY
+          )
+          uv run python src/eval.py --checkpoint "${BEST_CKPT}" --output_dir experiments --device cpu --missing_modality_test
+
+      - name: Generate analysis plots
+        if: matrix.fusion == 'hybrid'
+        run: |
+          uv run python src/analysis.py --experiment_dir experiments --output_dir analysis
           
