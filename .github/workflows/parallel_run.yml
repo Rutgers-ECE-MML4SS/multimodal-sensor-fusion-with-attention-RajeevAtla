@@ -214,10 +214,10 @@ jobs:
   merge:
     runs-on: ubuntu-latest
     needs:
-      - fusion
-      - heads
-      - chunks
-      - single
+      - fusion-sweep
+      - heads-ablation
+      - chunks-ablation
+      - single-modality-sweep
     concurrency:
       group: artifact-push-${{ github.ref }}
       cancel-in-progress: false
