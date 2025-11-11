@@ -1,7 +1,7 @@
 # notes
 
 ## environment setup
-- conda is really slow, probably significantly contributes to the 30 min time limit -> use uv instead
+- conda is really slow -> use uv instead
 
 ## data
 
@@ -22,20 +22,28 @@
   - Chunk metadata is cached under `dataset.chunk_cache_dir` so reruns don’t recompute shard windows; delete the `.pt` files if chunk sizes change.
 
 ## formatting/linting/type checking
-- formatting and linting done with ruff
-- type checking done with ty
+- formatting and linting done with `ruff`
+- type checking done with `ty`
 
-## running (github actions)
-- gh actions gives a pretty slim image - 16 gb ram, 2 vcpu cores (ubuntu-latest)
-- can reduce further - 5 gb ram, 1 vcpu (ubuntu-slim); max execution time is 15 minutes however
-- `complete_run.yml` now runs a quick fusion sweep (early/late/hybrid, 5 epochs each) via `uv run python src/train.py model.fusion_type=<type> training.max_epochs=5` to validate all heads without blowing the time budget, then calls `src/eval.py` and `src/analysis.py` so `experiments/*.json` and `analysis/*.png` are always emitted as part of the job.
-- `parallel_run.yml` mirrors the sweep but through a fusion matrix; only the hybrid leg runs the evaluation/analysis steps so artifacts don’t get duplicated.
-- Evaluation step looks up the best hybrid checkpoint from `runs/a2_hybrid_pamap2/results.json` (Lightning writes the path there) before invoking `src/eval.py` with `--missing_modality_test`.
-- Analysis step simply points `src/analysis.py` at the freshly written `experiments/` directory; make sure any custom experiment JSONs land there if you extend the workflow.
-- Lightning's `configure_gradient_clipping` hook was updated to accept optional `optimizer_idx`/clip args, matching the latest API so CI runs don't crash when clipping is enabled.
-- `build_fusion_model` strips hybrid-only kwargs (e.g., `num_heads`) before instantiating Early/Late fusion, keeping a single Hydra config compatible with every architecture.
-- Training perf knobs:
-  - `training.gradient_accumulation` emulates larger batches even when manifest chunks stay at batch_size=1.
-  - Torch threading gets clamped to the 4-core GitHub runner via `_configure_torch_threads`, and `torch.compile` is enabled with a tiny LRU cache so successive runs reuse compiled graphs.
-  - `model.modality_fold_size` lets you process modalities in smaller folds without altering fusion architectures (set `0` to keep the legacy "all at once" behavior).
-- On Windows runners there’s no MSVC toolchain, so `_maybe_compile_modules` now auto-detects that and skips `torch.compile`; Linux/CI builds still use the compiler cache.
+## running on ci
+- GH runners provide ~16 GB RAM & 2 vCPUs (ubuntu-latest). 
+- the merged workflow runs 13 short training jobs (3 fusion, 3 heads, 3 chunk sizes, 4 single-modality baselines).
+- All training/analysis lives in `.github/workflows/parallel_run.yml`. Jobs:
+  - `fusion-sweep`: early/late/hybrid (15 epochs); writes `experiments/<fusion>/` JSONs, `analysis/fusion/<fusion>/` plots, and uploads `artifacts/fusion/<fusion>/`.
+  - `heads-ablation`: hybrid model with `{1,4,8}` heads; uploads `artifacts/heads/<value>/`.
+  - `chunks-ablation`: hybrid model with chunk sizes `{256,512,1024}`; uploads `artifacts/chunk/<size>/`.
+  - `single-modality-sweep`: early fusion with each modality alone; uploads `artifacts/single/<mod>/`.
+- Each job packages its outputs into unique subfolders before upload (`artifacts/<group>/<config>/runs|experiments|analysis/...`). This avoids file collisions when artifacts are merged.
+- The final `merge` job downloads all artifacts, copies their contents back into `runs/`, `experiments/`, and `analysis/`, rebuilds `experiments/fusion_comparison.json`, and calls `src/analysis.py --fusion_file ...` to regenerate the global comparison plot. Only this job pushes to git (guarded with a concurrency lock so it runs alone).
+- To keep the workflow healthy:
+  - Always respect the packaging layout if you add new jobs (copy into a unique `artifacts/<new_group>/<config>` prefix).
+  - `src/eval.py` now writes `uncertainty.json`, `attention_viz.png`, calibration plots, and missing-modality JSONs for every run; make sure you don’t remove those hooks.
+  - `analysis.py` supports `--fusion_file` so you can regenerate the aggregate plot locally: `uv run python src/analysis.py --experiment_dir experiments --output_dir analysis --fusion_file experiments/fusion_comparison.json`.
+  
+## steps for running locally
+- install uv ([docs](https://docs.astral.sh/uv/getting-started/installation/))
+- create venv - `uv venv`
+- activate it - `.venv\Scipts\activate`
+- sync dependencies - `uv sync`
+- train a model - `uv python run src/train.py` (set whatever flags you need, defaults are in config/base.yml)
+- run analysis `uv run python src/analysis.py --experiment_dir experiments --output_dir analysis --fusion_file experiments/fusion_comparison.json`
