@@ -272,6 +272,10 @@ jobs:
             cp -R "$pkg/experiments/." experiments/ 2>/dev/null || true
             cp -R "$pkg/analysis/." analysis/ 2>/dev/null || true
           done
+      - name: Generate fused plots
+        run: |
+          set -euo pipefail
+          uv run python src/analysis.py --experiment_dir experiments --output_dir analysis --fusion_file experiments/fusion_comparison.json
       - name: Aggregate fusion metrics
         run: |
           set -euo pipefail
