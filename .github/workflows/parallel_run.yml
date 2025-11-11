@@ -55,14 +55,22 @@ jobs:
       - name: Generate analysis plots
         run: |
           uv run python src/analysis.py --experiment_dir experiments --output_dir analysis
+      - name: Package fusion artifacts
+        env:
+          FUSION: ${{ matrix.fusion }}
+        run: |
+          set -euo pipefail
+          DEST="artifacts/fusion/${FUSION}"
+          mkdir -p "${DEST}/runs" "${DEST}/experiments" "${DEST}/analysis/fusion"
+          cp -r "runs/a2_${FUSION}_pamap2" "${DEST}/runs/"
+          cp -r "experiments/${FUSION}" "${DEST}/experiments/"
+          mkdir -p "${DEST}/analysis/fusion"
+          cp -r "analysis/${FUSION}" "${DEST}/analysis/fusion/"
       - name: Upload fusion artifacts
         uses: actions/upload-artifact@v4
         with:
           name: fusion-${{ matrix.fusion }}
-          path: |
-            runs/a2_${{ matrix.fusion }}_pamap2
-            experiments/${{ matrix.fusion }}
-            analysis/${{ matrix.fusion }}
+          path: artifacts/fusion/${{ matrix.fusion }}
 
   heads-ablation:
     runs-on: ubuntu-latest
@@ -105,13 +113,21 @@ jobs:
           mkdir -p "${OUT_DIR}"
           uv run python src/eval.py --checkpoint "${CKPT}" --output_dir "${OUT_DIR}" --device cpu --analysis_dir analysis_heads
       - run: uv run python src/analysis.py --experiment_dir experiments --output_dir analysis_heads
+      - name: Package heads artifacts
+        env:
+          HEADS: ${{ matrix.heads }}
+        run: |
+          set -euo pipefail
+          DEST="artifacts/heads/${HEADS}"
+          mkdir -p "${DEST}/runs" "${DEST}/experiments" "${DEST}/analysis/heads"
+          cp -r "runs/a2_hybrid_heads${HEADS}" "${DEST}/runs/"
+          cp -r "experiments/heads_${HEADS}" "${DEST}/experiments/"
+          mkdir -p "${DEST}/analysis/heads"
+          cp -r "analysis_heads" "${DEST}/analysis/heads/${HEADS}"
       - uses: actions/upload-artifact@v4
         with:
           name: heads-${{ matrix.heads }}
-          path: |
-            runs/a2_hybrid_heads${{ matrix.heads }}
-            experiments/heads_${{ matrix.heads }}
-            analysis_heads
+          path: artifacts/heads/${{ matrix.heads }}
 
   chunks-ablation:
     runs-on: ubuntu-latest
@@ -154,13 +170,21 @@ jobs:
           mkdir -p "${OUT_DIR}"
           uv run python src/eval.py --checkpoint "${CKPT}" --output_dir "${OUT_DIR}" --device cpu --analysis_dir analysis_chunk
       - run: uv run python src/analysis.py --experiment_dir experiments --output_dir analysis_chunk
+      - name: Package chunk artifacts
+        env:
+          CHUNK: ${{ matrix.chunk }}
+        run: |
+          set -euo pipefail
+          DEST="artifacts/chunk/${CHUNK}"
+          mkdir -p "${DEST}/runs" "${DEST}/experiments" "${DEST}/analysis/chunk"
+          cp -r "runs/a2_hybrid_chunk${CHUNK}" "${DEST}/runs/"
+          cp -r "experiments/chunk_${CHUNK}" "${DEST}/experiments/"
+          mkdir -p "${DEST}/analysis/chunk"
+          cp -r "analysis_chunk" "${DEST}/analysis/chunk/${CHUNK}"
       - uses: actions/upload-artifact@v4
         with:
           name: chunk-${{ matrix.chunk }}
-          path: |
-            runs/a2_hybrid_chunk${{ matrix.chunk }}
-            experiments/chunk_${{ matrix.chunk }}
-            analysis_chunk
+          path: artifacts/chunk/${{ matrix.chunk }}
 
   single-modality-sweep:
     runs-on: ubuntu-latest
@@ -203,13 +227,21 @@ jobs:
           mkdir -p "${OUT_DIR}"
           uv run python src/eval.py --checkpoint "${CKPT}" --output_dir "${OUT_DIR}" --device cpu --analysis_dir analysis_single
       - run: uv run python src/analysis.py --experiment_dir experiments --output_dir analysis_single
+      - name: Package single-modality artifacts
+        env:
+          MOD: ${{ matrix.modality }}
+        run: |
+          set -euo pipefail
+          DEST="artifacts/single/${MOD}"
+          mkdir -p "${DEST}/runs" "${DEST}/experiments" "${DEST}/analysis/single"
+          cp -r "runs/a2_single_${MOD}" "${DEST}/runs/"
+          cp -r "experiments/single_${MOD}" "${DEST}/experiments/"
+          mkdir -p "${DEST}/analysis/single"
+          cp -r "analysis_single" "${DEST}/analysis/single/${MOD}"
       - uses: actions/upload-artifact@v4
         with:
           name: single-${{ matrix.modality }}
-          path: |
-            runs/a2_single_${{ matrix.modality }}
-            experiments/single_${{ matrix.modality }}
-            analysis_single
+          path: artifacts/single/${{ matrix.modality }}
 
   merge:
     runs-on: ubuntu-latest
@@ -229,7 +261,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: "*"
-          merge-multiple: true
+          merge-multiple: false
+      - name: Merge downloaded artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p runs experiments analysis
+          shopt -s nullglob
+          for pkg in artifacts/*/*; do
+            cp -R "$pkg/runs/." runs/ 2>/dev/null || true
+            cp -R "$pkg/experiments/." experiments/ 2>/dev/null || true
+            cp -R "$pkg/analysis/." analysis/ 2>/dev/null || true
+          done
       - name: Aggregate fusion metrics
         run: |
           set -euo pipefail
