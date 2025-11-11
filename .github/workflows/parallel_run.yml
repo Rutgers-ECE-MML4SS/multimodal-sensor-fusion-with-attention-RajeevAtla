@@ -35,7 +35,7 @@ jobs:
             model.fusion_type=${{ matrix.fusion }} \
             training.max_epochs=15 \
             experiment.name=a2_${{ matrix.fusion }}_pamap2
-      - name: Evaluate ${ { matrix.fusion } } fusion
+      - name: Evaluate ${{ matrix.fusion }} fusion
         env:
           FUSION: ${{ matrix.fusion }}
         run: |
@@ -272,6 +272,11 @@ jobs:
             cp -R "$pkg/experiments/." experiments/ 2>/dev/null || true
             cp -R "$pkg/analysis/." analysis/ 2>/dev/null || true
           done
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          activate-environment: "true"
+      - run: uv sync
       - name: Generate fused plots
         run: |
           set -euo pipefail
