@@ -22,6 +22,13 @@ plt.style.use("seaborn-v0_8-darkgrid")
 sns.set_palette("husl")
 
 
+def _get_metric(metrics: Mapping[str, Any], keys: Sequence[str], default: float = 0.0) -> float:
+    for key in keys:
+        if key in metrics:
+            return float(metrics[key])
+    return default
+
+
 def plot_fusion_comparison(
     results: Mapping[str, Any],
     save_path: Path | str = Path("analysis/fusion_comparison.png"),
@@ -35,11 +42,21 @@ def plot_fusion_comparison(
     """
     # Extract data
     strategies = list(results["results"].keys())
-    accuracies = [results["results"][s]["accuracy"] for s in strategies]
-    f1_scores = [results["results"][s]["f1_macro"] for s in strategies]
-    eces = [results["results"][s]["ece"] for s in strategies]
+    accuracies = [
+        _get_metric(results["results"][s], ["accuracy", "test_accuracy"])
+        for s in strategies
+    ]
+    f1_scores = [
+        _get_metric(results["results"][s], ["f1_macro", "test_f1_macro"])
+        for s in strategies
+    ]
+    eces = [_get_metric(results["results"][s], ["ece"]) for s in strategies]
     inference_times = [
-        results["results"][s]["inference_ms"] for s in strategies
+        _get_metric(
+            results["results"][s],
+            ["inference_ms", "inference_ms_mean", "latency_ms"],
+        )
+        for s in strategies
     ]
 
     # Create figure with subplots
@@ -376,7 +393,9 @@ def _process_experiment_dir(
 
 
 def generate_all_plots(
-    experiment_dir: Path | str, output_dir: Path | str
+    experiment_dir: Path | str,
+    output_dir: Path | str,
+    fusion_summary: Path | str | None = None,
 ) -> None:
     """
     Generate plots for each fusion type or for the provided experiment directory.
@@ -414,6 +433,16 @@ def generate_all_plots(
         print(f"\n[{idx}/{len(tasks)}] Processing: {label}")
         _process_experiment_dir(src_dir, dest_dir)
 
+    if fusion_summary is not None:
+        fusion_path = Path(fusion_summary)
+        if fusion_path.exists():
+            print("\nGenerating global fusion comparison plot...")
+            with open(fusion_path) as f:
+                data = json.load(f)
+            plot_fusion_comparison(data, output_path / "fusion_comparison.png")
+        else:
+            print(f"Warning: fusion summary {fusion_path} not found.")
+
     print("\n" + "=" * 80)
     print("Plot generation complete!")
     print(f"Plots saved to: {output_path}")
@@ -434,10 +463,18 @@ def main():
         default="analysis",
         help="Directory to save plots",
     )
+    parser.add_argument(
+        "--fusion_file",
+        type=str,
+        default=None,
+        help="Optional path to a fusion comparison summary JSON",
+    )
 
     args = parser.parse_args()
 
-    generate_all_plots(args.experiment_dir, args.output_dir)
+    generate_all_plots(
+        args.experiment_dir, args.output_dir, args.fusion_file
+    )
 
 
 if __name__ == "__main__":
