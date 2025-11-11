@@ -51,7 +51,7 @@ jobs:
           MOD: ${{ matrix.modality }}
         run: |
           set -euo pipefail
-          RESULTS_FILE="runs/a2_single_${MOD}/results.json"
+          export RESULTS_FILE="runs/a2_single_${MOD}/results.json"
           CKPT=$(python - <<'PY'
           import json, os
           from pathlib import Path
