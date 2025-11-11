@@ -138,8 +138,17 @@ def _configure_cli_mocks(monkeypatch, tmp_path, missing: bool = False):
                 },
             )()
             model_cfg = type("ModelCfg", (), {"fusion_type": "hybrid"})()
+            evaluation_cfg = type(
+                "EvaluationCfg", (), {"num_calibration_bins": 5}
+            )()
             self.config = type(
-                "Config", (), {"dataset": dataset_cfg, "model": model_cfg}
+                "Config",
+                (),
+                {
+                    "dataset": dataset_cfg,
+                    "model": model_cfg,
+                    "evaluation": evaluation_cfg,
+                },
             )()
 
         def eval(self):
@@ -160,18 +169,22 @@ def _configure_cli_mocks(monkeypatch, tmp_path, missing: bool = False):
         torch.tensor([0, 1]),
         torch.tensor([0.6, 0.7]),
     )
+    logits = torch.tensor([[2.0, 0.5, -1.0], [0.1, 1.5, -0.2]])
 
     monkeypatch.setattr(evaluation, "MultimodalFusionModule", LoaderWrapper)
+    sample_batch = _make_batch()
+
     monkeypatch.setattr(
         evaluation,
         "create_dataloaders",
-        lambda **_: (["train"], ["val"], ["test_loader"]),
+        lambda **_: ([sample_batch], [sample_batch], [sample_batch]),
     )
-    monkeypatch.setattr(
-        evaluation,
-        "evaluate_model",
-        lambda *args, **kwargs: (metrics, predictions),
-    )
+    def _fake_evaluate(*args, **kwargs):
+        if kwargs.get("include_logits"):
+            return metrics, (*predictions, logits)
+        return metrics, predictions
+
+    monkeypatch.setattr(evaluation, "evaluate_model", _fake_evaluate)
 
     missing_results = {
         "full_modalities": {"accuracy": 0.85},
@@ -200,6 +213,18 @@ def _configure_cli_mocks(monkeypatch, tmp_path, missing: bool = False):
         @staticmethod
         def expected_calibration_error(*args, **kwargs):
             return 0.05
+
+        @staticmethod
+        def maximum_calibration_error(*args, **kwargs):
+            return 0.1
+
+        @staticmethod
+        def negative_log_likelihood(*args, **kwargs):
+            return 0.2
+
+        @staticmethod
+        def reliability_diagram(*args, **kwargs):
+            return None
 
     monkeypatch.setattr(evaluation, "CalibrationMetrics", DummyCalibration)
 
@@ -275,8 +300,17 @@ def test_eval_script_entrypoint_runs(tmp_path, monkeypatch, capsys):
                 },
             )()
             model_cfg = type("ModelCfg", (), {"fusion_type": "hybrid"})()
+            evaluation_cfg = type(
+                "EvaluationCfg", (), {"num_calibration_bins": 4}
+            )()
             self.config = type(
-                "Config", (), {"dataset": dataset_cfg, "model": model_cfg}
+                "Config",
+                (),
+                {
+                    "dataset": dataset_cfg,
+                    "model": model_cfg,
+                    "evaluation": evaluation_cfg,
+                },
             )()
 
     class LoaderWrapper:
@@ -294,6 +328,18 @@ def test_eval_script_entrypoint_runs(tmp_path, monkeypatch, capsys):
         @staticmethod
         def expected_calibration_error(*args, **kwargs):
             return 0.02
+
+        @staticmethod
+        def maximum_calibration_error(*args, **kwargs):
+            return 0.05
+
+        @staticmethod
+        def negative_log_likelihood(*args, **kwargs):
+            return 0.1
+
+        @staticmethod
+        def reliability_diagram(*args, **kwargs):
+            return None
 
     tqdm_stub = types.ModuleType("tqdm")
 

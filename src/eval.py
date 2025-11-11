@@ -36,7 +36,13 @@ def _cfg_get(cfg: Any, key: str, default: Any = None) -> Any:
     return getattr(cfg, key, default)
 
 
-def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
+def evaluate_model(
+    model,
+    dataloader,
+    device="cpu",
+    return_predictions: bool = False,
+    include_logits: bool = False,
+):
     """
     Evaluate model on a dataset.
 
@@ -44,11 +50,12 @@ def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
         model: Trained model
         dataloader: Data loader
         device: Device to run on
-        return_predictions: If True, return all predictions and labels
+        return_predictions: If True, return tensors for preds/labels/confidences
+        include_logits: When returning predictions, also include raw logits
 
     Returns:
         metrics: Dict with accuracy, loss, etc.
-        predictions: Optional tuple of (preds, labels, confidences)
+        predictions: Optional tuple of (preds, labels, confidences[, logits])
     """
     model.eval()
     model.to(device)
@@ -111,7 +118,14 @@ def evaluate_model(model, dataloader, device="cpu", return_predictions=False):
     }
 
     if return_predictions:
-        return metrics, (all_preds, all_labels, all_confidences, all_logits)
+        prediction_tuple: tuple[torch.Tensor, ...] = (
+            all_preds,
+            all_labels,
+            all_confidences,
+        )
+        if include_logits:
+            prediction_tuple = (*prediction_tuple, all_logits)
+        return metrics, prediction_tuple
     else:
         return metrics
 
@@ -200,7 +214,11 @@ def measure_inference_latency(model, dataloader, device="cpu") -> tuple[float, f
                 mask = mask.to(device)
 
             batch_start = time.perf_counter()
-            model(features, mask)
+            try:
+                model(features, mask)
+            except TypeError:
+                print("  Warning: Model call failed during latency measurement, skipping batch.")
+                continue
             elapsed = time.perf_counter() - batch_start
             per_sample_ms.append((elapsed / batch_size) * 1000.0)
 
@@ -238,7 +256,7 @@ def generate_attention_visualization(
     with torch.no_grad():
         try:
             _, attention_info = model(features, mask, return_attention=True)
-        except ValueError:
+        except (ValueError, TypeError):
             return None
 
     attention_maps = attention_info.get("attention_maps", {})
@@ -518,7 +536,11 @@ def main():
     print("=" * 80)
 
     metrics, (preds, labels, confidences, logits) = evaluate_model(
-        model, test_loader, args.device, return_predictions=True
+        model,
+        test_loader,
+        args.device,
+        return_predictions=True,
+        include_logits=True,
     )
 
     print(f"\nTest Accuracy: {metrics['accuracy']:.4f}")
