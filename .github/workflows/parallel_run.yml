@@ -307,8 +307,5 @@ jobs:
           git add runs
           git add experiments
           git add analysis
-          git add analysis_heads
-          git add analysis_chunk
-          git add analysis_single
           git commit -m "ci: merge artifacts" || echo "No changes to commit"
           git push origin "${{ github.head_ref || github.ref_name }}"
