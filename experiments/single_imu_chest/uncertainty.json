@@ -1,0 +1,9 @@
+{
+  "dataset": "pamap2",
+  "fusion_type": "early",
+  "ece": 0.11364879459142685,
+  "mce": 0.4475841224193573,
+  "nll": 1.1360278129577637,
+  "num_bins": 15,
+  "calibration_plot": "analysis_single/early/calibration.png"
+}
