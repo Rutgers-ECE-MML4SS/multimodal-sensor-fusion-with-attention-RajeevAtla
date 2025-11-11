@@ -133,7 +133,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [256, 512, 1024]
+        chunk: [512, 1024, 2048]
     steps:
       - uses: actions/checkout@v4
         with:
