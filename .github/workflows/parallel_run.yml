@@ -15,7 +15,6 @@ jobs:
     strategy:
       matrix:
         fusion: [early, late, hybrid]
-    needs: []
 
     steps:
       - name: Checkout repository
