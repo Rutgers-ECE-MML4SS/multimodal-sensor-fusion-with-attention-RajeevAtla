@@ -262,6 +262,7 @@ jobs:
         with:
           pattern: "*"
           merge-multiple: false
+          path: artifacts
       - name: Merge downloaded artifacts
         run: |
           set -euo pipefail
