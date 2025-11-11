@@ -47,3 +47,4 @@
 - sync dependencies - `uv sync`
 - train a model - `uv python run src/train.py` (set whatever flags you need, defaults are in config/base.yml)
 - run analysis `uv run python src/analysis.py --experiment_dir experiments --output_dir analysis --fusion_file experiments/fusion_comparison.json`
+- all runs were done on a Github Actions `ubuntu-latest` runner (2 CPU cores, 7 GB of RAM, x64 architecture)
