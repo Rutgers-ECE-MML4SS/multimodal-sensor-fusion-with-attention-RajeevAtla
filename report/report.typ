@@ -200,4 +200,5 @@ making it the most practical default for deployment.
 #pagebreak()
 
 #show bibliography: set heading(numbering: "1.")
+
 #bibliography("citations.bib", title: "References", style: "ieee")
