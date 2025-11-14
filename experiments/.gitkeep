@@ -1,6 +1,0 @@
-# This file ensures the experiments/ directory is tracked by git
-# Your experiment JSON files will go here:
-# - fusion_comparison.json
-# - missing_modality.json
-# - uncertainty.json
-
