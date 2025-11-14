@@ -150,7 +150,7 @@ jobs:
           uv run python src/train.py \
             model.fusion_type=hybrid \
             dataset.chunk_size=${{ matrix.chunk }} \
-            training.max_epochs=15 \
+            training.max_epochs=10 \
             experiment.name=a2_hybrid_chunk${{ matrix.chunk }}
       - name: Evaluate chunk=${{ matrix.chunk }}
         env:
