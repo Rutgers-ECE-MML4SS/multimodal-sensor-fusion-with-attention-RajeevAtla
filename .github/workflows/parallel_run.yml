@@ -33,7 +33,7 @@ jobs:
         run: |
           uv run python src/train.py \
             model.fusion_type=${{ matrix.fusion }} \
-            training.max_epochs=15 \
+            training.max_epochs=10 \
             experiment.name=a2_${{ matrix.fusion }}_pamap2
       - name: Evaluate ${{ matrix.fusion }} fusion
         env:
@@ -93,7 +93,7 @@ jobs:
           uv run python src/train.py \
             model.fusion_type=hybrid \
             model.num_heads=${{ matrix.heads }} \
-            training.max_epochs=15 \
+            training.max_epochs=10 \
             experiment.name=a2_hybrid_heads${{ matrix.heads }}
       - name: Evaluate num_heads=${{ matrix.heads }}
         env:
